@@ -2,7 +2,7 @@ from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 
-RESERVATION_UID = 'github.com/threefoldtech/broker/reservation/0.0.1'
+RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
 
 
 class GridBroker(TemplateBase):
@@ -69,6 +69,7 @@ def _parse_tx_data(tx):
         data = data.decode()
     data = j.data.serializer.json.loads(data)
     data['txId'] = tx.id
+    data['amount'] = tx.amount
     return data
 
 
