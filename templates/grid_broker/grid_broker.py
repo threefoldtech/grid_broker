@@ -80,11 +80,16 @@ class TransactionWatcher:
         self.last_sent = 0
 
     def watch(self):
-        tnxs = self._wallet.list_incoming_transactions()
-        tnxs.reverse()
+        txns = self._wallet.list_incoming_transactions()
+        txns.reverse()
         try:
-            for tx in tnxs[self.last_sent:]:
+            for tx in txns[self.last_sent:]:
                 self.last_sent += 1
+                if self._is_locked(tx):
+                    continue
                 yield tx
         except IndexError:
             return
+
+    def _is_locked(self, tx):
+        return tx._locked
