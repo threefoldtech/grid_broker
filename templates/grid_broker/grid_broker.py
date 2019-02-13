@@ -36,19 +36,47 @@ class GridBroker(TemplateBase):
             if self.data['processed'].get(tx.id, False):
                 self.logger.info("tx %s already processed", tx.id)
                 continue
+            # try to parse the transaction data
             try:
-                self._deploy(tx)
-                self.data['processed'][tx.id] = True
-                self.logger.info("transaction processed %s", tx.id)
+                data = _parse_tx_data(tx)
             except Exception as err:
-                self.data['processed'][tx.id] = False
-                self.logger.error("error processing transation %s: %s", tx.id, str(err))
+                # malformed data, refund transaction, though we can't notify the person that this happened
+                self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
+                self._refund(tx)
+                self.data['processed'][tx.id] = True
+                return
 
-    def _deploy(self, tx):
+            # try to deploy the reservation
+            try:
+                self._deploy(tx, data)
+                self.logger.info("transaction processed %s", tx.id)
+                # get connection info and insert into mail
+                reservation = self.api.services.get(name=tx.id, template_uid=RESERVATION_UID)
+                task = reservation.schedule_action('connection_info').wait(die=True)
+                if task.state != 'ok':
+                    raise Exception("can't get connection info")
+                robot_url, zos_addr, vnc_addr = task.result
+                self._notify_user(
+                    data['email'],
+                    "Your virtual 0-OS is ready on the Threefold grid",
+                    _vm_template.format(robot_url=robot_url, zos_addr=zos_addr, vnc_addr=vnc_addr),
+                )
+            except Exception as err:
+                self.logger.error("error processing transation %s: %s", tx.id, str(err))
+                self._refund(tx)
+                self._notify_user(
+                    data['email'],
+                    "Reservation failed",
+                    _refund_template.format(address=tx.from_addresses[0])
+                )
+            finally:
+                # even if a deploy errors, we refund so it is considered processed
+                self.data['processed'][tx.id] = True
+
+    def _deploy(self, tx, data):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
 
-        data = _parse_tx_data(tx)
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
             s.schedule_action('install')
@@ -57,6 +85,26 @@ class GridBroker(TemplateBase):
             pass
 
         self.save()
+
+    def _refund(self, tx):
+        if not tx.amount > DEFAULT_MINERFEE:
+            self.logger.info("not refunding tx %s, amount too low", tx.id)
+        self.logger.info("refunding tx %s to %s", tx.id, tx.from_addresses[0])
+        self._wallet.send_money((tx.amount - DEFAULT_MINERFEE)/TFT_PRECISION, tx.from_addresses[0])
+
+    def _notify_user(self, receiver, subject, content):
+        clients = self.api.services.find(template_name='sendgrid_client')
+        if not clients:
+            self.logger.warning("there is no sendgrid client configured on the robot. cannot send email")
+            return
+
+        client = clients[0]
+        client.schedule_action('send', {
+            'sender': 'broker@grid.tf',
+            'receiver': receiver,
+            'subject': subject,
+            'content': content,
+        })
 
 
 def _parse_tx_data(tx):
@@ -93,3 +141,39 @@ class TransactionWatcher:
 
     def _is_locked(self, tx):
         return tx._locked
+
+DEFAULT_MINERFEE = 100000000
+TFT_PRECISION = 1000000000
+
+_vm_template = """
+<html>
+
+<body>
+    <h1>You virtual 0-OS has been deployed</h1>
+    <div class="content">
+        <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
+                threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
+        <p>
+            <ul>
+                <li>0-OS address: {zos_addr}</li>
+                <li>0-robot url: <a href="{robot_url}">{robot_url}</a></li>
+                <li>VNC address: <pre>{vnc_addr}<pre></li>
+            </ul>
+        </p>
+    </div>
+</body>
+
+</html>
+"""
+
+_refund_template = """
+<html>
+
+<body>
+    <h1>We could not complete your reservation at this time</h1>
+    <div class="content">
+        <p>Unfortunately, we could not complete your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
+    </div>
+</body>
+</html>
+"""

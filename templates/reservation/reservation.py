@@ -2,6 +2,7 @@ import time
 
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
+from zerorobot.template.decorator import retry
 from zerorobot.service_collection import ServiceNotFoundError
 
 DAY = 86400
@@ -33,6 +34,7 @@ class Reservation(TemplateBase):
         if not self.data.get('creationTimestamp'):
             self.data['creationTimestamp'] = time.time()
 
+    @retry((Exception), tries=4, delay=5, backoff=2, logger=None)
     def install(self):
         deploy_map = {
             'vm': self._install_vm,
@@ -52,6 +54,10 @@ class Reservation(TemplateBase):
 
         install(self.data['size'])
         self.state.set('actions', 'install', 'ok')
+
+    def connection_info(self):
+        if self.data['type'] == 'vm':
+            return self._vm_connect_info()
 
     def _install_vm(self, size):
         if size == 1:
@@ -77,7 +83,13 @@ class Reservation(TemplateBase):
         }
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
-        vm.schedule_action('enable_vnc')
+        vm.schedule_action('enable_vnc').wait(die=True)
+
+    def _vm_connect_info(self):
+        vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
+        if vm is None:
+            self.logger.error("Didn't find vm")
+            return
 
         task = vm.schedule_action('info')
         task.wait()
@@ -86,18 +98,13 @@ class Reservation(TemplateBase):
             return
 
         info = task.result
-        self.logger.info("vm installed %s", info)
 
         vm_ip = info['zerotier']['ip']
         host_ip = info['host']['public_addr']
         robot_url = 'http://%s:6600' % vm_ip
         zos_addr = "%s:6379" % vm_ip
         vnc_addr = "%s:%s" % (host_ip, info['vnc'])
-
-        self._notify_user(
-            "Your virtual 0-OS is ready on the Threefold grid",
-            _vm_template.format(robot_url=robot_url, zos_addr=zos_addr, vnc_addr=vnc_addr),
-        )
+        return (robot_url, zos_addr, vnc_addr)
 
     def _notify_user(self, subject, content):
         clients = self.api.services.find(template_name='sendgrid_client')
@@ -131,24 +138,3 @@ class Reservation(TemplateBase):
                 pass
             self.state.set('actions', 'cleanup', 'ok')
 
-
-_vm_template = """
-<html>
-
-<body>
-    <h1>You virtual 0-OS has been deployed</h1>
-    <div class="content">
-        <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
-                threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
-        <p>
-            <ul>
-                <li>0-OS address: {zos_addr}</li>
-                <li>0-robot url: <a href="{robot_url}">{robot_url}</a></li>
-                <li>VNC address: <pre>{vnc_addr}<pre></li>
-            </ul>
-        </p>
-    </div>
-</body>
-
-</html>
-"""
