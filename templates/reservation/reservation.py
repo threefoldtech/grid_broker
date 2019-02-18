@@ -8,6 +8,8 @@ from zerorobot.service_collection import ServiceNotFoundError
 DAY = 86400
 WEEK = 604800
 DMVM_GUID = 'github.com/threefoldtech/0-templates/dm_vm/0.0.1'
+S3_GUID = 'github.com/threefoldtech/0-templates/s3/0.0.1'
+REVERSE_PROXY_UID = 'github.com/threefoldtech/0-templates/reverse_proxy/0.0.1'
 
 PRICE_MAP = {
     'vm': {
@@ -38,6 +40,7 @@ class Reservation(TemplateBase):
     def install(self):
         deploy_map = {
             'vm': self._install_vm,
+            's3': self._install_s3,
         }
 
         price = PRICE_MAP.get(self.data['type'], {}).get(self.data['size'])
@@ -58,6 +61,8 @@ class Reservation(TemplateBase):
     def connection_info(self):
         if self.data['type'] == 'vm':
             return self._vm_connect_info()
+        elif self.data['type'] == 's3':
+            return self._s3_connect_info()
 
     def _install_vm(self, size):
         if size == 1:
@@ -85,6 +90,47 @@ class Reservation(TemplateBase):
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
 
+    def _install_s3(self, size):
+        if size == 1:
+            disk = 50
+        elif size == 2:
+            disk = 100
+        else:
+            raise ValueError('size can only be 1 or 2')
+
+        # for now only allow 'kristof-farm-s3'
+        if not self.data['location'] in ['kristof-farm-s3']:
+            raise ValueError('can only deploy s3 in kristof-farm-s3')
+
+        data = {
+            'farmerIyoOrg': self.data['location'],
+            'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
+            'storageType': 'hdd',
+            'storageSize': disk,
+            'minioLogin': j.data.idgenerator.generateXCharID(8),
+            'minioPassword': j.data.idgenerator.generateXCharID(16),
+            'nsName': j.data.idgenerator.generateGUID(),
+        }
+        s3 = self.api.services.find_or_create(S3_GUID, self.data['txId'], data)
+        s3.schedule_action('install').wait(die=True)
+
+        task = s3.schedule_action('url')
+        task.wait()
+        if task.state != 'ok':
+            self.logger.error("error retrieving S3 url: \n%s", task.eco.trace)
+            return
+
+        urls = task.result
+        self.logger.info("s3 installed %s at", urls)
+
+        rp_data = {
+            'webGateway': 'web_gateway',
+            'domain': '',  # TODO: generate random domain ?
+            'servers': [urls['public']],
+        }
+        reverse_proxy = self.api.services.find_or_create(template_uid=REVERSE_PROXY_UID, name='rp-%s' % s3.name)
+        reverse_proxy.schedule_action('update_servers', args={'servers': [urls['public']]})
+
     def _vm_connect_info(self):
         vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
         if vm is None:
@@ -104,37 +150,49 @@ class Reservation(TemplateBase):
         robot_url = 'http://%s:6600' % vm_ip
         zos_addr = "%s:6379" % vm_ip
         vnc_addr = "%s:%s" % (host_ip, info['vnc'])
-        return (robot_url, zos_addr, vnc_addr)
+        return ('vm', robot_url, zos_addr, vnc_addr)
 
-    def _notify_user(self, subject, content):
-        clients = self.api.services.find(template_name='sendgrid_client')
-        if not clients:
-            self.logger.warning("there is no sendgrid client configured on the robot. cannot send email")
+    def _s3_connect_info(self):
+        s3 = self.api.services.get(template_uid=S3_GUID, name=self.data['txId'])
+        if s3 is None:
+            self.logger.error("Didn't find s3 instance")
             return
 
-        client = clients[0]
-        client.schedule_action('send', {
-            'sender': 'broker@grid.tf',
-            'receiver': self.data['email'],
-            'subject': subject,
-            'content': content,
-        })
+        task = s3.schedule_action('url')
+        task.wait()
+        if task.state != 'ok':
+            self.logger.error("error retrieving s3 connection info: \n%s", task.eco.trace)
+            return
+        urls = task.result
+
+        return ('s3', urls['public'], s3.data['minioLogin'], s3.data['minioPassword'])
 
     def _cleanup(self):
-        type_map = {
-            'vm': 'dm_vm',
-        }
         created = self.data['creationTimestamp']
         now = int(time.time())
 
         if (time.time() - created) > WEEK:
             self.logger.info("reservation has expired, uninstalling")
-            try:
-                template_name = type_map.get(self.data['type'])
-                service = self.api.services.get(name=self.data['txId'], template_name=template_name)
-                service.schedule_action('uninstall').wait(die=True)
-                service.delete()
-            except ServiceNotFoundError:
-                pass
+            tids = self._get_template_ids()
+            for tid in tids:
+                self._cleanup_service(tid[0], tid[1])
             self.state.set('actions', 'cleanup', 'ok')
+
+    def _get_template_ids(self):
+        if self.data['type'] == 'vm':
+            return [(self.data['txId'], 'dm_vm')]
+        elif self.data['type'] == 's3':
+            s3 = self.api.services.get(name=self.data['txId'], template_name='s3')
+            return [('rp-%s' % s3.name, 'reverse_proxy'), (self.data['txId'], 's3')]
+        else:
+            self.logger.error("Can't uninstall service type %s", self.data['type'])
+
+    def _cleanup_service(self, name, template_name):
+        self.logger.info("uninstalling {template_name} - {name}".format(name=name, template_name=template_name))
+        try:
+            service = self.api.services.get(name=name, template_name=template_name)
+            service.schedule_action('uninstall').wait(die=True)
+            service.delete()
+        except ServiceNotFoundError:
+            pass
 

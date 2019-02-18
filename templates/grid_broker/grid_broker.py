@@ -55,12 +55,7 @@ class GridBroker(TemplateBase):
                 task = reservation.schedule_action('connection_info').wait(die=True)
                 if task.state != 'ok':
                     raise Exception("can't get connection info")
-                robot_url, zos_addr, vnc_addr = task.result
-                self._notify_user(
-                    data['email'],
-                    "Your virtual 0-OS is ready on the Threefold grid",
-                    _vm_template.format(robot_url=robot_url, zos_addr=zos_addr, vnc_addr=vnc_addr),
-                )
+                self._send_connection_info(data['email'], task.result)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
                 self._refund(tx)
@@ -91,6 +86,22 @@ class GridBroker(TemplateBase):
             self.logger.info("not refunding tx %s, amount too low", tx.id)
         self.logger.info("refunding tx %s to %s", tx.id, tx.from_addresses[0])
         self._wallet.send_money((tx.amount - DEFAULT_MINERFEE)/TFT_PRECISION, tx.from_addresses[0])
+
+    def _send_connection_info(self, email, data):
+        if data[0] == 'vm':
+            self._notify_user(
+                email,
+                "Your virtual 0-OS is ready on the Threefold grid",
+                _vm_template.format(robot_url=data[1], zos_addr=data[2], vnc_addr=data[3])
+            )
+        elif data[0] == 's3':
+            self._notify_user(
+                email,
+                "Your S3 archive server is ready on the Threefold grid",
+                _s3_template.format(urls=data[1], login=data[2], password=data[3])
+            )
+        else:
+            self.logger.error("Can't send connection info for %s", data[0])
 
     def _notify_user(self, receiver, subject, content):
         clients = self.api.services.find(template_name='sendgrid_client')
@@ -184,6 +195,25 @@ _vm_template = """
     </div>
 </body>
 
+</html>
+"""
+
+_s3_template = """
+<html>
+<body>
+    <h1>You S3 archive server has been deployed</h1>
+    <div class="content">
+        <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
+                threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
+        <p>
+            <ul>
+                <li>S3 url: {url}</li>
+                <li>Login: {login}</li>
+                <li>Password: {password}</li>
+            </ul>
+        </p>
+    </div>
+</body>
 </html>
 """
 
