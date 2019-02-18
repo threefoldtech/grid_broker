@@ -110,15 +110,36 @@ class GridBroker(TemplateBase):
 def _parse_tx_data(tx):
     """
     format:
-    {"type":"vm", "size":1,"email":"user@mail.com"}
+    1 byte: type
+    1 byte: size
+    1 byte: len(location)
+    len(location): location (nodeID for vm, farm name for s3)
+    1 byte: len(email)
+    len(email): email address
     """
     data = tx.data
-    if isinstance(data, bytes):
-        data = data.decode()
-    data = j.data.serializer.json.loads(data)
-    data['txId'] = tx.id
-    data['amount'] = tx.amount
-    return data
+    decoded_data = {}
+
+    if data[0] == 1:
+        decoded_data['type'] = 'vm'
+    elif data[0] == 2:
+        decoded_data['type'] = 's3'
+    else:
+        decoded_data['type'] = '???'
+
+    decoded_data['size'] = data[1] 
+
+    location_len = data[2]
+    location = data[3:3+location_len].decode()
+    decoded_data['location'] = location
+
+    email_len = data[3+location_len]
+    email = data[3+location_len+1:3+location_len+1+email_len].decode()
+    decoded_data['email'] = email
+ 
+    decoded_data['txId'] = tx.id
+    decoded_data['amount'] = tx.amount
+    return decoded_data
 
 
 class TransactionWatcher:
