@@ -78,8 +78,8 @@ class Reservation(TemplateBase):
             'kernelArgs': [{'key': 'development', 'name': 'developmet'}],
             'memory': memory,
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
-            'nodeId': 'ac1f6b272370'  # TODO: capacity planning for node selection
-            # 'nodeId': 'ac1f6b4573d4'
+            'nodeId': self.data['location']
+            # 'nodeId': 'ac1f6b272370'
         }
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
