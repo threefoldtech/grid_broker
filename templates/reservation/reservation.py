@@ -55,8 +55,9 @@ class Reservation(TemplateBase):
         if not install:
             raise ValueError("unsupported reservation type %s size %s" % (self.data['type'], self.data['size']))
 
-        install(self.data['size'])
+        install_result = install(self.data['size'])
         self.state.set('actions', 'install', 'ok')
+        return install_result
 
     def connection_info(self):
         if self.data['type'] == 'vm':
@@ -90,6 +91,8 @@ class Reservation(TemplateBase):
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
 
+        return self._vm_connect_info()
+
     def _install_s3(self, size):
         if size == 1:
             disk = 50
@@ -102,17 +105,21 @@ class Reservation(TemplateBase):
         if not self.data['location'] in ['kristof-farm-s3']:
             raise ValueError('can only deploy s3 in kristof-farm-s3')
 
+        login = j.data.idgenerator.generateXCharID(8)
+        password = j.data.idgenerator.generateXCharID(16)
         data = {
             'farmerIyoOrg': self.data['location'],
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
             'storageType': 'hdd',
             'storageSize': disk,
-            'minioLogin': j.data.idgenerator.generateXCharID(8),
-            'minioPassword': j.data.idgenerator.generateXCharID(16),
+            'minioLogin': login,
+            'minioPassword': password,
             'nsName': j.data.idgenerator.generateGUID(),
+            'dataShards': 4,
+            'parityShards': 2,
         }
         s3 = self.api.services.find_or_create(S3_GUID, self.data['txId'], data)
-        s3.schedule_action('install').wait(die=True)
+        task = s3.schedule_action('install').wait(die=True)
 
         task = s3.schedule_action('url')
         task.wait()
@@ -125,11 +132,15 @@ class Reservation(TemplateBase):
 
         rp_data = {
             'webGateway': 'web_gateway',
-            'domain': '',  # TODO: generate random domain ?
+            'domain': '{}.wg01.grid.tf'.format(j.data.idgenerator.generateXCharID(6)),
             'servers': [urls['public']],
         }
-        reverse_proxy = self.api.services.find_or_create(template_uid=REVERSE_PROXY_UID, name='rp-%s' % s3.name)
-        reverse_proxy.schedule_action('update_servers', args={'servers': [urls['public']]})
+        reverse_proxy = self.api.services.find_or_create(REVERSE_PROXY_UID, 'rp-%s' % s3.name, rp_data)
+        reverse_proxy.schedule_action('install').wait(die=True)
+        reverse_proxy.schedule_action('update_servers', args={'servers': [urls['public']]}).wait(die=True)
+
+        typ, urls, _, _, domain = self._s3_connect_info()
+        return (typ, urls, login, password, domain)
 
     def _vm_connect_info(self):
         vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
@@ -165,7 +176,9 @@ class Reservation(TemplateBase):
             return
         urls = task.result
 
-        return ('s3', urls['public'], s3.data['minioLogin'], s3.data['minioPassword'])
+        rp = self.api.services.get(template_uid=REVERSE_PROXY_UID, name='rp-{}'.format(self.data['txId']))
+
+        return ('s3', urls['public'], s3.data['minioLogin_'], s3.data['minioPassword_'], rp.data['domain'])
 
     def _cleanup(self):
         created = self.data['creationTimestamp']

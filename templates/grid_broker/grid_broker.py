@@ -48,14 +48,11 @@ class GridBroker(TemplateBase):
 
             # try to deploy the reservation
             try:
-                self._deploy(tx, data)
+                connection_info = self._deploy(tx, data)
                 self.logger.info("transaction processed %s", tx.id)
-                # get connection info and insert into mail
-                reservation = self.api.services.get(name=tx.id, template_uid=RESERVATION_UID)
-                task = reservation.schedule_action('connection_info').wait(die=True)
-                if task.state != 'ok':
-                    raise Exception("can't get connection info")
-                self._send_connection_info(data['email'], task.result)
+                # insert connection info into mail
+                if connection_info:
+                    self._send_connection_info(data['email'], connection_info)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
                 self._refund(tx)
@@ -74,12 +71,13 @@ class GridBroker(TemplateBase):
 
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
-            s.schedule_action('install')
+            task = s.schedule_action('install').wait(die=True)
+            return task.result
         except ServiceConflictError:
             # skip the creation of the service since it already exists
             pass
-
-        self.save()
+        finally:
+            self.save()
 
     def _refund(self, tx):
         if not tx.amount > DEFAULT_MINERFEE:
@@ -98,7 +96,7 @@ class GridBroker(TemplateBase):
             self._notify_user(
                 email,
                 "Your S3 archive server is ready on the Threefold grid",
-                _s3_template.format(urls=data[1], login=data[2], password=data[3])
+                _s3_template.format(urls=data[1], login=data[2], password=data[3], domain=data[4])
             )
         else:
             self.logger.error("Can't send connection info for %s", data[0])
@@ -207,7 +205,8 @@ _s3_template = """
                 threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
         <p>
             <ul>
-                <li>S3 url: {url}</li>
+                <li>S3 url: {urls}</li>
+                <li>S3 domain: {domain}</li>
                 <li>Login: {login}</li>
                 <li>Password: {password}</li>
             </ul>
