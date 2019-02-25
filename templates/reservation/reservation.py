@@ -120,6 +120,7 @@ class Reservation(TemplateBase):
         }
         s3 = self.api.services.find_or_create(S3_GUID, self.data['txId'], data)
         task = s3.schedule_action('install').wait(die=True)
+        credentials = task.result
 
         task = s3.schedule_action('url')
         task.wait()
@@ -140,7 +141,10 @@ class Reservation(TemplateBase):
         reverse_proxy.schedule_action('update_servers', args={'servers': [urls['public']]}).wait(die=True)
 
         typ, urls, _, _, domain = self._s3_connect_info()
-        return (typ, urls, login, password, domain)
+        # credentails need to be returned from the task since they are currently
+        # different from the ones given when the S3 is created
+        # See https://github.com/threefoldtech/0-templates/issues/303
+        return (typ, urls, credentials['login'], credentials['password'], domain)
 
     def _vm_connect_info(self):
         vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
