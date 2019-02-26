@@ -199,8 +199,7 @@ class Reservation(TemplateBase):
         if self.data['type'] == 'vm':
             return [(self.data['txId'], 'dm_vm')]
         elif self.data['type'] == 's3':
-            s3 = self.api.services.get(name=self.data['txId'], template_name='s3')
-            return [('rp-%s' % s3.name, 'reverse_proxy'), (self.data['txId'], 's3')]
+            return [('rp-%s' % self.data['txId'], 'reverse_proxy'), (self.data['txId'], 's3')]
         else:
             self.logger.error("Can't uninstall service type %s", self.data['type'])
 
