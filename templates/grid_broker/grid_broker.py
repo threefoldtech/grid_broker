@@ -2,6 +2,8 @@ from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 
+import time
+
 RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
 
 
@@ -150,6 +152,65 @@ def _parse_tx_data(tx):
     decoded_data['amount'] = tx.amount
     return decoded_data
 
+def _parse_tx_data2(tx):
+    """
+    transaction data is a hash
+    expected notary format:
+        timestamp: unix timestamp
+        content: encrypted content
+        signature: hex encoded signature
+        3bot id: id of the 3bot
+    """
+    data_key = tx.data
+    data = _get_data(data_key)
+    if not data:
+        return
+
+    # Make sure timestamp is in the past
+    if not time.time() > data['timestamp']:
+        return
+
+    # verify signature
+    verification_key = _get_3bot_key(data['3bot_id'])
+    if not _verify_signature(verification_key, data['content'], data['signature']):
+        return
+
+    return _decrypt_data(verification_key, data['content']
+
+def _get_data(key):
+    """
+    get data from the notary associated with a key
+    """
+    hex_key = key.hex()
+    print(hex_key)
+    # TODO: actual call to notary
+    # mock response
+    data_map = {'': ''}
+    return data_map.get(hex_key, {})
+
+def _verify_signature(verification_key, content, signature):
+    """
+    verify data, assume blake2b hash for the content
+    returns true if the signature is valid
+    """
+    #TODO
+    return True
+
+def _decrypt_data(verification_key, content):
+    """
+    decrypt the content by converting the verification key to a curve25519 public key
+    """
+    # TODO
+    return {}
+
+def _get_3bot_key(id):
+    """
+    get the key from the 3bot with the given id
+    """
+    # TODO
+    # mock data
+    key_map: {1: '', 2: ''}
+    return key_map.get(id, '')
 
 class TransactionWatcher:
 
