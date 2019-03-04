@@ -1,6 +1,7 @@
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
+from nacl.signing import VerifyKey
 
 import time
 
@@ -117,6 +118,67 @@ class GridBroker(TemplateBase):
             'content': content,
         })
 
+    def _parse_tx_data2(self, tx):
+        """
+        transaction data is a hash
+        expected notary format:
+            timestamp: unix timestamp
+            content: encrypted content
+            signature: hex encoded signature
+            3bot id: id of the 3bot
+        """
+        data_key = tx.data
+        data = _get_data(data_key)
+        if not data:
+            return
+
+        # Make sure timestamp is in the past
+        if not time.time() > data['timestamp']:
+            return
+
+        # verify signature
+        verification_key = _get_3bot_key(data['3bot_id'])
+        if not _verify_signature(verification_key, data['content'], data['signature']):
+            return
+
+        return _decrypt_data(verification_key, data['content']
+
+    def _get_data(self, key):
+        """
+        get data from the notary associated with a key
+        """
+        hex_key = key.hex()
+        print(hex_key)
+        # TODO: actual call to notary
+        # mock response
+        data_map = {'': ''}
+        return data_map.get(hex_key, {})
+
+    def _verify_signature(self, verification_key, content, signature):
+        """
+        verify data
+        returns true if the signature is valid
+        """
+        #TODO
+        return True
+
+    def _decrypt_data(self, verification_key, content):
+        """
+        decrypt the content by converting the verification key to a curve25519 public key
+        """
+        # TODO
+        return {}
+
+    def _get_3bot_key(self, id):
+        """
+        get the key from the 3bot with the given id
+        """
+        key = self._wallet.get_3bot_key(id)
+        algo, key = key.split(':')
+        if algo is not 'ed25519':
+            return None
+        keybytes = bytes.fromhex(key)
+        return VerifyKey(keybytes)
 
 def _parse_tx_data(tx):
     """
@@ -147,70 +209,10 @@ def _parse_tx_data(tx):
     email_len = data[3+location_len]
     email = data[3+location_len+1:3+location_len+1+email_len].decode()
     decoded_data['email'] = email
- 
+
     decoded_data['txId'] = tx.id
     decoded_data['amount'] = tx.amount
     return decoded_data
-
-def _parse_tx_data2(tx):
-    """
-    transaction data is a hash
-    expected notary format:
-        timestamp: unix timestamp
-        content: encrypted content
-        signature: hex encoded signature
-        3bot id: id of the 3bot
-    """
-    data_key = tx.data
-    data = _get_data(data_key)
-    if not data:
-        return
-
-    # Make sure timestamp is in the past
-    if not time.time() > data['timestamp']:
-        return
-
-    # verify signature
-    verification_key = _get_3bot_key(data['3bot_id'])
-    if not _verify_signature(verification_key, data['content'], data['signature']):
-        return
-
-    return _decrypt_data(verification_key, data['content']
-
-def _get_data(key):
-    """
-    get data from the notary associated with a key
-    """
-    hex_key = key.hex()
-    print(hex_key)
-    # TODO: actual call to notary
-    # mock response
-    data_map = {'': ''}
-    return data_map.get(hex_key, {})
-
-def _verify_signature(verification_key, content, signature):
-    """
-    verify data, assume blake2b hash for the content
-    returns true if the signature is valid
-    """
-    #TODO
-    return True
-
-def _decrypt_data(verification_key, content):
-    """
-    decrypt the content by converting the verification key to a curve25519 public key
-    """
-    # TODO
-    return {}
-
-def _get_3bot_key(id):
-    """
-    get the key from the 3bot with the given id
-    """
-    # TODO
-    # mock data
-    key_map: {1: '', 2: ''}
-    return key_map.get(id, '')
 
 class TransactionWatcher:
 
