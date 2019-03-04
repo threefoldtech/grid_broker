@@ -157,10 +157,12 @@ class GridBroker(TemplateBase):
     def _verify_signature(self, verification_key, content, signature):
         """
         verify data
-        returns true if the signature is valid
+        returns content if verification is successful, None otherwise
         """
-        #TODO
-        return True
+        try:
+            return j.data.nacl.verify_ed25519(content, signature, verification_key)
+        except:
+            return None
 
     def _decrypt_data(self, verification_key, content):
         """
