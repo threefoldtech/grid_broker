@@ -145,7 +145,7 @@ class GridBroker(TemplateBase):
 
     def _get_data(self, key):
         """
-        get data from the notary associated with a key
+        get data from the notary associated with a key. The key is assumed to be in bytes form
         """
         hex_key = key.hex()
         print(hex_key)
@@ -164,12 +164,16 @@ class GridBroker(TemplateBase):
         except:
             return None
 
-    def _decrypt_data(self, verification_key, content):
+    def _decrypt_data(self, verification_key, signing_key, content):
         """
-        decrypt the content by converting the verification key to a curve25519 public key
+        Decrypt data by converting a verfication key and signing key to their respective
+        curve25519 public/private keys. verification and signing key are instances of
+        nacl.signing.(VerifyKey|SigningKey). Content is assumed to be in byte form
         """
-        # TODO
-        return {}
+        private_key = j.data.nacl.signing_key_to_private_key(signing_key)
+        public_key = j.data.nacl.verify_key_to_public_key(verification_key)
+        decrypted_content = j.data.nacl.decrypt_curve25519(content, private_key, public_key)
+        return decrypted_content
 
     def _get_3bot_key(self, id):
         """
