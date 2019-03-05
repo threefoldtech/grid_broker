@@ -130,13 +130,13 @@ class GridBroker(TemplateBase):
             3bot id: id of the 3bot
         """
         data_key = tx.data
-        data = _get_data(data_key)
+        data = self._get_data(data_key)
         if not data:
             return
 
         # verify signature
-        verification_key = _get_3bot_key(data['threebot_id'])
-        if not _verify_signature(verification_key, data['content'], data['content_signature']):
+        verification_key = self._get_3bot_key(data['threebot_id'])
+        if not self._verify_signature(verification_key, data['content'], data['content_signature']):
             return
 
         # decrypt data
@@ -155,7 +155,6 @@ class GridBroker(TemplateBase):
         get data from the notary associated with a key. The key is assumed to be in bytes form
         """
         hex_key = key.hex()
-        print(hex_key)
         # we should always be able to reach the notary so don't catch an error
         response = requests.get('{}/get?key={}'.format(NOTARY_URL, hex_key, timeout=30))
         if response.status_code != 200:
@@ -193,40 +192,6 @@ class GridBroker(TemplateBase):
             return None
         keybytes = bytes.fromhex(key)
         return VerifyKey(keybytes)
-
-#def _parse_tx_data(tx):
-#    """
-#    format:
-#    1 byte: type
-#    1 byte: size
-#    1 byte: len(location)
-#    len(location): location (nodeID for vm, farm name for s3)
-#    1 byte: len(email)
-#    len(email): email address
-#    """
-#    data = tx.data
-#    decoded_data = {}
-#
-#    if data[0] == 1:
-#        decoded_data['type'] = 'vm'
-#    elif data[0] == 2:
-#        decoded_data['type'] = 's3'
-#    else:
-#        decoded_data['type'] = '???'
-#
-#    decoded_data['size'] = data[1] 
-#
-#    location_len = data[2]
-#    location = data[3:3+location_len].decode()
-#    decoded_data['location'] = location
-#
-#    email_len = data[3+location_len]
-#    email = data[3+location_len+1:3+location_len+1+email_len].decode()
-#    decoded_data['email'] = email
-#
-#    decoded_data['txId'] = tx.id
-#    decoded_data['amount'] = tx.amount
-#    return decoded_data
 
 class TransactionWatcher:
 
