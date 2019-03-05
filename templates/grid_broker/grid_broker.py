@@ -4,8 +4,10 @@ from zerorobot.service_collection import ServiceConflictError
 from nacl.signing import VerifyKey
 
 import time
+import requests
 
 RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
+NOTARY_URL = 'http://'
 
 
 class GridBroker(TemplateBase):
@@ -41,7 +43,7 @@ class GridBroker(TemplateBase):
                 continue
             # try to parse the transaction data
             try:
-                data = _parse_tx_data(tx)
+                data = self._parse_tx_data(tx)
             except Exception as err:
                 # malformed data, refund transaction, though we can't notify the person that this happened
                 self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
@@ -118,11 +120,10 @@ class GridBroker(TemplateBase):
             'content': content,
         })
 
-    def _parse_tx_data2(self, tx):
+    def _parse_tx_data(self, tx):
         """
         transaction data is a hash
         expected notary format:
-            timestamp: unix timestamp
             content: encrypted content
             signature: hex encoded signature
             3bot id: id of the 3bot
@@ -132,16 +133,18 @@ class GridBroker(TemplateBase):
         if not data:
             return
 
-        # Make sure timestamp is in the past
-        if not time.time() > data['timestamp']:
-            return
-
         # verify signature
-        verification_key = _get_3bot_key(data['3bot_id'])
-        if not _verify_signature(verification_key, data['content'], data['signature']):
+        verification_key = _get_3bot_key(data['threebot_id'])
+        if not _verify_signature(verification_key, data['content'], data['content_signature']):
             return
 
-        return _decrypt_data(verification_key, data['content']
+        # decrypt data
+        signing_key = self._wallet.private_key(tx.to_address)
+        if not signing_key:
+            return
+
+        decrypted_data = self._decrypt_data(verification_key, signing_key, data['content']
+        #TODO
 
     def _get_data(self, key):
         """
@@ -149,10 +152,11 @@ class GridBroker(TemplateBase):
         """
         hex_key = key.hex()
         print(hex_key)
-        # TODO: actual call to notary
-        # mock response
-        data_map = {'': ''}
-        return data_map.get(hex_key, {})
+        # we should always be able to reach the notary so don't catch an error
+        response = requests.get('{}/get?key={}'.format(NOTARY_URL, hex_key, timeout=30)
+        if response.status_code != 200:
+            return None
+        return response.json()
 
     def _verify_signature(self, verification_key, content, signature):
         """
@@ -186,39 +190,39 @@ class GridBroker(TemplateBase):
         keybytes = bytes.fromhex(key)
         return VerifyKey(keybytes)
 
-def _parse_tx_data(tx):
-    """
-    format:
-    1 byte: type
-    1 byte: size
-    1 byte: len(location)
-    len(location): location (nodeID for vm, farm name for s3)
-    1 byte: len(email)
-    len(email): email address
-    """
-    data = tx.data
-    decoded_data = {}
-
-    if data[0] == 1:
-        decoded_data['type'] = 'vm'
-    elif data[0] == 2:
-        decoded_data['type'] = 's3'
-    else:
-        decoded_data['type'] = '???'
-
-    decoded_data['size'] = data[1] 
-
-    location_len = data[2]
-    location = data[3:3+location_len].decode()
-    decoded_data['location'] = location
-
-    email_len = data[3+location_len]
-    email = data[3+location_len+1:3+location_len+1+email_len].decode()
-    decoded_data['email'] = email
-
-    decoded_data['txId'] = tx.id
-    decoded_data['amount'] = tx.amount
-    return decoded_data
+#def _parse_tx_data(tx):
+#    """
+#    format:
+#    1 byte: type
+#    1 byte: size
+#    1 byte: len(location)
+#    len(location): location (nodeID for vm, farm name for s3)
+#    1 byte: len(email)
+#    len(email): email address
+#    """
+#    data = tx.data
+#    decoded_data = {}
+#
+#    if data[0] == 1:
+#        decoded_data['type'] = 'vm'
+#    elif data[0] == 2:
+#        decoded_data['type'] = 's3'
+#    else:
+#        decoded_data['type'] = '???'
+#
+#    decoded_data['size'] = data[1] 
+#
+#    location_len = data[2]
+#    location = data[3:3+location_len].decode()
+#    decoded_data['location'] = location
+#
+#    email_len = data[3+location_len]
+#    email = data[3+location_len+1:3+location_len+1+email_len].decode()
+#    decoded_data['email'] = email
+#
+#    decoded_data['txId'] = tx.id
+#    decoded_data['amount'] = tx.amount
+#    return decoded_data
 
 class TransactionWatcher:
 
