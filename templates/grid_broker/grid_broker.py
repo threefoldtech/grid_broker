@@ -7,7 +7,8 @@ import time
 import requests
 
 RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
-NOTARY_URL = 'http://'
+# Test notary
+NOTARY_URL = 'http://10.241.78.116:6830'
 
 
 class GridBroker(TemplateBase):
@@ -143,7 +144,7 @@ class GridBroker(TemplateBase):
         if not signing_key:
             return
 
-        decrypted_data = self._decrypt_data(verification_key, signing_key, data['content']
+        decrypted_data = self._decrypt_data(verification_key, signing_key, data['content'])
         data_dict = j.data.serializer.msgpack.loads(decrypted_data.decode('utf-8'))
         data_dict['txId'] = tx.id
         data_dict['amount'] = tx.amount
@@ -156,7 +157,7 @@ class GridBroker(TemplateBase):
         hex_key = key.hex()
         print(hex_key)
         # we should always be able to reach the notary so don't catch an error
-        response = requests.get('{}/get?key={}'.format(NOTARY_URL, hex_key, timeout=30)
+        response = requests.get('{}/get?key={}'.format(NOTARY_URL, hex_key, timeout=30))
         if response.status_code != 200:
             return None
         return response.json()
