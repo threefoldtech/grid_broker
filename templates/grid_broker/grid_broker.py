@@ -45,12 +45,15 @@ class GridBroker(TemplateBase):
             # try to parse the transaction data
             try:
                 data = self._parse_tx_data(tx)
+                # refund if there is not data
+                if not data:
+                    self._refund(tx)
             except Exception as err:
                 # malformed data, refund transaction, though we can't notify the person that this happened
                 self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
                 self._refund(tx)
                 self.data['processed'][tx.id] = True
-                return
+                continue
 
             # try to deploy the reservation
             try:
@@ -130,6 +133,8 @@ class GridBroker(TemplateBase):
             3bot id: id of the 3bot
         """
         data_key = tx.data
+        if not data_key:
+            return
         data = self._get_data(data_key)
         if not data:
             return
