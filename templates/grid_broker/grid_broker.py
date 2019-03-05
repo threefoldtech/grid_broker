@@ -144,7 +144,10 @@ class GridBroker(TemplateBase):
             return
 
         decrypted_data = self._decrypt_data(verification_key, signing_key, data['content']
-        #TODO
+        data_dict = j.data.serializer.msgpack.loads(decrypted_data.decode('utf-8'))
+        data_dict['txId'] = tx.id
+        data_dict['amount'] = tx.amount
+        return data_dict
 
     def _get_data(self, key):
         """
