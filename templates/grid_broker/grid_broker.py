@@ -135,7 +135,9 @@ class GridBroker(TemplateBase):
         data_key = tx.data
         if not data_key:
             return
-        data = self._get_data(data_key)
+        key = data_key.decode('utf-8')
+
+        data = self._get_data(key)
         if not data:
             return
 
@@ -159,9 +161,8 @@ class GridBroker(TemplateBase):
         """
         get data from the notary associated with a key. The key is assumed to be in bytes form
         """
-        hex_key = key.hex()
         # we should always be able to reach the notary so don't catch an error
-        response = requests.get('{}/get?key={}'.format(NOTARY_URL, hex_key, timeout=30))
+        response = requests.get('{}/get?key={}'.format(NOTARY_URL, key, timeout=30))
         if response.status_code != 200:
             return None
         return response.json()
