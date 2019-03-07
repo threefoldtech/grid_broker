@@ -1,14 +1,15 @@
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
-from nacl.signing import VerifyKey
+from nacl.signing import VerifyKey, SigningKey
 
 import time
 import requests
+import base64
 
 RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
 # Test notary
-NOTARY_URL = 'http://10.241.78.116:6830'
+NOTARY_URL = 'http://10.241.78.116:6831'
 
 
 class GridBroker(TemplateBase):
@@ -141,6 +142,10 @@ class GridBroker(TemplateBase):
         if not data:
             return
 
+        # base64 decode content and signature
+        data['content'] = base64.b64decode(data.get('content', ""))
+        data['content_signature'] = base64.b64decode(data.get('content_signature', ""))
+
         # verify signature
         verification_key = self._get_3bot_key(data['threebot_id'])
         if not self._verify_signature(verification_key, data['content'], data['content_signature']):
@@ -150,19 +155,21 @@ class GridBroker(TemplateBase):
         signing_key = self._wallet.private_key(tx.to_address)
         if not signing_key:
             return
+        # ed25519 private keys actually hold an appended copy of the pub key, we only care for the first 32 bytes
+        signing_key = SigningKey(signing_key[:32])
 
         decrypted_data = self._decrypt_data(verification_key, signing_key, data['content'])
-        data_dict = j.data.serializer.msgpack.loads(decrypted_data.decode('utf-8'))
+        data_dict = j.data.serializer.msgpack.loads(decrypted_data)
         data_dict['txId'] = tx.id
         data_dict['amount'] = tx.amount
         return data_dict
 
     def _get_data(self, key):
         """
-        get data from the notary associated with a key. The key is assumed to be in bytes form
+        get data from the notary associated with a key. The key is assumed to be in hex form
         """
         # we should always be able to reach the notary so don't catch an error
-        response = requests.get('{}/get?key={}'.format(NOTARY_URL, key, timeout=30))
+        response = requests.get('{}/get?hash={}'.format(NOTARY_URL, key), timeout=30)
         if response.status_code != 200:
             return None
         return response.json()
@@ -194,7 +201,7 @@ class GridBroker(TemplateBase):
         """
         key = self._wallet.get_3bot_key(id)
         algo, key = key.split(':')
-        if algo is not 'ed25519':
+        if algo != 'ed25519':
             return None
         keybytes = bytes.fromhex(key)
         return VerifyKey(keybytes)
