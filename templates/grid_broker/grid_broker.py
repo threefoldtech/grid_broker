@@ -220,6 +220,14 @@ class TransactionWatcher:
                 self.last_sent += 1
                 if self._is_locked(tx):
                     continue
+                # ignore the returned output to ourselves if we send money to someone else
+                to_self = False
+                for address in tx.from_addresses:
+                    if address in self._wallet.addresses:
+                        to_self = True
+                        break
+                if to_self:
+                    continue
                 yield tx
         except IndexError:
             return
