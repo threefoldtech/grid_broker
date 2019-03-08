@@ -11,6 +11,8 @@ DMVM_GUID = 'github.com/threefoldtech/0-templates/dm_vm/0.0.1'
 S3_GUID = 'github.com/threefoldtech/0-templates/s3/0.0.1'
 REVERSE_PROXY_UID = 'github.com/threefoldtech/0-templates/reverse_proxy/0.0.1'
 
+DIRECTORY_URL = 'https://capacity.threefoldtoken.com'
+
 PRICE_MAP = {
     'vm': {
         1: 1000000000,
@@ -77,6 +79,14 @@ class Reservation(TemplateBase):
         else:
             raise ValueError('size can only be 1 or 2')
 
+        # For the location we support both nodeID and farm name. Check if the location is known
+        # as a farm name in the directory and if so, deploy on the least used node. else it is a
+        # nodeID, so just try that for the deploy
+        location = self.data['location']
+        nodeID = get_least_used_node_from_farm(location)
+        if nodeID is not None:
+            location = nodeID
+
         data = {
             'cpu': cpu,
             'disks': [{'diskType': 'hdd', 'label': 'cache', 'size': disk}],
@@ -84,7 +94,7 @@ class Reservation(TemplateBase):
             'kernelArgs': [{'key': 'development', 'name': 'developmet'}],
             'memory': memory,
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
-            'nodeId': self.data['location']
+            'nodeId': location
             # 'nodeId': 'ac1f6b272370'
         }
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
@@ -212,3 +222,24 @@ class Reservation(TemplateBase):
         except ServiceNotFoundError:
             pass
 
+def _get_farm_nodes(farmname):
+    """
+    get a list of nodes in the given farm
+    """
+    return j.sal_zos.farm.get(farmname).list_nodes()
+
+def get_least_used_node_from_farm(farmname):
+    """
+    get the node ID of the least used node in a given farm based on cru/mru/sru
+    """
+    nodes = _get_farm_nodes(farmname):
+    if not nodes:
+        return
+    def key(node):
+        return (-node['total_resources']['cru'],
+                -node['total_resources']['mru'],
+                -node['total_resources']['sru'],
+                node['used_resources']['cru'],
+                node['used_resources']['mru'],
+                node['used_resources']['sru'])
+    return sorted(nodes, key=key)[0]['node_id']
