@@ -89,7 +89,7 @@ class Reservation(TemplateBase):
 
         data = {
             'cpu': cpu,
-            'disks': [{'diskType': 'hdd', 'label': 'cache', 'size': disk}],
+            'disks': [{'diskType': 'ssd', 'label': 'cache', 'size': disk}],
             'image': 'zero-os:master',
             'kernelArgs': [{'key': 'development', 'name': 'developmet'}],
             'memory': memory,
