@@ -224,15 +224,15 @@ class Reservation(TemplateBase):
 
 def _get_farm_nodes(farmname):
     """
-    get a list of nodes in the given farm
+    get a list of online nodes in the given farm
     """
-    return j.sal_zos.farm.get(farmname).list_nodes()
+    return list(j.sal_zos.farm.get(farmname).filter_online_nodes())
 
 def get_least_used_node_from_farm(farmname):
     """
     get the node ID of the least used node in a given farm based on cru/mru/sru
     """
-    nodes = _get_farm_nodes(farmname):
+    nodes = _get_farm_nodes(farmname)
     if not nodes:
         return
     def key(node):
