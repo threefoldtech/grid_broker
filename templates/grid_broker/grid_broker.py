@@ -8,8 +8,7 @@ import requests
 import base64
 
 RESERVATION_UID = 'github.com/threefoldtech/grid_broker/reservation/0.0.1'
-# Test notary
-NOTARY_URL = 'http://10.241.78.116:6831'
+NOTARY_URL = 'https://notary.grid.tf'
 
 
 class GridBroker(TemplateBase):
