@@ -31,7 +31,7 @@ class GridBroker(TemplateBase):
     @property
     def _watcher(self):
         if self._watcher_ is None:
-            self._watcher_ = TransactionWatcher(self._wallet)
+            self._watcher_ = TransactionWatcher(self._wallet, self.data['minHeight'])
         return self._watcher_
 
     def _watch_transactions(self):
@@ -210,9 +210,10 @@ class GridBroker(TemplateBase):
 
 class TransactionWatcher:
 
-    def __init__(self, wallet):
+    def __init__(self, wallet, min_blockheight=0):
         self._wallet = wallet
         self.last_sent = 0
+        self._min_height = min_blockheight
 
     def watch(self):
         txns = self._wallet.list_incoming_transactions()
@@ -220,6 +221,9 @@ class TransactionWatcher:
         try:
             for tx in txns[self.last_sent:]:
                 self.last_sent += 1
+                # ignore tx created before the min block height
+                if tx.block_height < self._min_height:
+                    continue
                 if self._is_locked(tx):
                     continue
                 # ignore the returned output to ourselves if we send money to someone else
