@@ -55,6 +55,9 @@ class GridBroker(TemplateBase):
                 self.data['processed'][tx.id] = True
                 continue
 
+            # add webgateway we want to use
+            data['webGateway'] = self.data['webGateway']
+
             # try to deploy the reservation
             try:
                 connection_info = self._deploy(tx, data)

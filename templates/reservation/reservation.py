@@ -142,7 +142,7 @@ class Reservation(TemplateBase):
         self.logger.info("s3 installed %s at", urls)
 
         rp_data = {
-            'webGateway': 'web_gateway',
+            'webGateway': self.data['webGateway'],
             'domain': '{}.wg01.grid.tf'.format(j.data.idgenerator.generateXCharID(6)),
             'servers': [urls['public']],
         }
