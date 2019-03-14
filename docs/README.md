@@ -70,20 +70,33 @@ For mode detail about the 3Bot registration, go to the full documentation: https
 
 #### 4. Do a reservation
 
+Example how to reserve a Zero-OS virtual machines:
 ```python
-r = w.reservation.new()
-r.type = 'VM' # choose the type of workload, currently we supports 2: 'S3' and 'VM'
-r.size = 1 # choose the size
-r.email = 'user@mail.com' # email address where to send the connection information once the workload is deployed
-r.bot_id = 'my3bot.example.org' # Your 3bot identification
-
-tx_id = w.reservation.send(r)
+result = w.capacity.reserve_zos_vm(
+    email='user@email.com', # the email on which you will received the connection information
+    threebot_id='my3bot.example.org', # your threebot id, it can be any of the names you gave to your 3bot
+    location='farm_name', # name of the farm or node id where to deploy the workload
+    size=1) # each workload have a different size available
 ```
 
-`tx_id` is the transaction ID in which you reservation has been created.
-You can check it on our [explorer](https://explorer.testnet.threefoldtoken.com/) by entering the transaction ID in the `Search by hash` field of the explorer form.
+Example how to reserve a S3 archive storage:
+```python
+result = w.capacity.reserve_zos_vm(
+    email='user@email.com', # the email on which you will received the connection information
+    threebot_id='my3bot.example.org', # your threebot id, it can be any of the names you gave to your 3bot
+    location='farm_name', # name of the farm where to deploy the workload
+    size=1) # each workload have a different size available
+```
 
-You workload is currently being deployed, you will receive an email with the connection information within a few minutes.
+The result of the reserve methods is a tuple containing the transaction and the submission status as a boolean.
+You can check it on our [explorer](https://explorer.testnet.threefoldtoken.com/) by entering the transaction ID in the `Search by hash` field of the explorer form or using the tfchain client:
+
+```python
+transaction = c.transaction_get(result.transaction.id)
+```
+
+As soon as it is ready, usually within a few minutes, you will receive an email with the connection information.
+
 
 ### Amount of TFT for each type of reservation:
 |type|size|amount| CPU | Memory | Storage   |
