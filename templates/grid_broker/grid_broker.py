@@ -222,7 +222,8 @@ class TransactionWatcher:
             for tx in txns[self.last_sent:]:
                 self.last_sent += 1
                 # ignore tx created before the min block height
-                if tx.block_height < self._min_height:
+                # unconfirmed tx have block height 0, add extra check for that
+                if tx.block_height < self._min_height and tx.confirmed:
                     continue
                 if self._is_locked(tx):
                     continue
