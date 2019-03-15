@@ -19,8 +19,8 @@ PRICE_MAP = {
         2: 4000000000,
     },
     's3': {
-        1: 10000000000,
-        2: 40000000000,
+        1: 50000000000,
+        2: 100000000000,
     }
 }
 
@@ -71,11 +71,11 @@ class Reservation(TemplateBase):
         if size == 1:
             cpu = 1
             memory = 2048
-            disk = 20
+            disk = 10
         elif size == 2:
             cpu = 2
             memory = 4096
-            disk = 60
+            disk = 40
         else:
             raise ValueError('size can only be 1 or 2')
 
@@ -105,9 +105,9 @@ class Reservation(TemplateBase):
 
     def _install_s3(self, size):
         if size == 1:
-            disk = 50
+            disk = 500
         elif size == 2:
-            disk = 100
+            disk = 1000
         else:
             raise ValueError('size can only be 1 or 2')
 
