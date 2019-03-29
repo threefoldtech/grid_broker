@@ -98,17 +98,29 @@ class GridBroker(TemplateBase):
         self._wallet.send_money((tx.amount - DEFAULT_MINERFEE)/TFT_PRECISION, tx.from_addresses[0])
 
     def _send_connection_info(self, email, data):
-        if data[0] == 'vm':
+        if data['type'] == 'vm':
             self._notify_user(
                 email,
                 "Your virtual 0-OS is ready on the Threefold grid",
-                _vm_template.format(robot_url=data[1], zos_addr=data[2], vnc_addr=data[3])
+                _vm_template.format(**data)
             )
-        elif data[0] == 's3':
+        elif data['type'] == 's3':
             self._notify_user(
                 email,
                 "Your S3 archive server is ready on the Threefold grid",
-                _s3_template.format(urls=data[1], login=data[2], password=data[3], domain=data[4])
+                _s3_template.format(**data)
+            )
+        elif data['type'] == 'namespace':
+            self._notify_user(
+                email,
+                "Your 0-DB namespace is ready on the Threefold grid",
+                _namespace_template.format(**data)
+            )
+        elif data['type'] == 'reverse_proxy':
+            self._notify_user(
+                email,
+                'Your reverse proxy is ready on the Threefold grid',
+                _proxy_template.format(**data),
             )
         else:
             self.logger.error("Can't send connection info for %s", data[0])
@@ -208,6 +220,7 @@ class GridBroker(TemplateBase):
         keybytes = bytes.fromhex(key)
         return VerifyKey(keybytes)
 
+
 class TransactionWatcher:
 
     def __init__(self, wallet, min_blockheight=0):
@@ -241,6 +254,7 @@ class TransactionWatcher:
 
     def _is_locked(self, tx):
         return tx._locked
+
 
 DEFAULT_MINERFEE = 100000000
 TFT_PRECISION = 1000000000
@@ -281,6 +295,43 @@ _s3_template = """
                 <li>Password: {password}</li>
             </ul>
         </p>
+    </div>
+</body>
+</html>
+"""
+
+_namespace_template = """
+<html>
+<body>
+    <h1>You 0-DB namespace has been deployed</h1>
+    <div class="content">
+        <p>Make sure you have joined the <a
+                href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835"
+                target="blank">public
+                threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
+        <p>
+            <ul>
+                <li>0-DB host: {ip}</li>
+                <li>0-DB port: {port}</li>
+                <li>Password: {password}</li>
+                <li>Namespace name: {nsName}</li>
+            </ul>
+        </p>
+        <p>For mode detail about 0-DB itself, head to the documentation on Github:
+            <a href="https://github.com/threefoldtech/0-db/blob/development/README.md"
+                target="blank">https://github.com/threefoldtech/0-db/blob/development/README.md</a>
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+_proxy_template = """
+<html>
+<body>
+    <h1>Your reverse_proxy has been deployed</h1>
+    <div class="content">
+        <p>Make sure that you have pointed your DNS configuration for the domain {domain} to the IP address: <em>{ip}</em></p>
     </div>
 </body>
 </html>
