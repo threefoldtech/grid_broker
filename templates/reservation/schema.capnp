@@ -1,4 +1,4 @@
-@0xdc4b924ea7e6c290;
+@0x9270e6b3bb8a042e;
 
 struct Schema {
     type @0 :Type;
