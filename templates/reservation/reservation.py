@@ -1,5 +1,7 @@
 import time
 
+from requests.exceptions import HTTPError
+
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.template.decorator import retry
@@ -10,19 +12,9 @@ WEEK = 604800
 DMVM_GUID = 'github.com/threefoldtech/0-templates/dm_vm/0.0.1'
 S3_GUID = 'github.com/threefoldtech/0-templates/s3/0.0.1'
 REVERSE_PROXY_UID = 'github.com/threefoldtech/0-templates/reverse_proxy/0.0.1'
+NAMESPACE_GUID = 'github.com/threefoldtech/0-templates/namespace/0.0.1'
 
 DIRECTORY_URL = 'https://capacity.threefoldtoken.com'
-
-PRICE_MAP = {
-    'vm': {
-        1: 1000000000,
-        2: 4000000000,
-    },
-    's3': {
-        1: 50000000000,
-        2: 100000000000,
-    }
-}
 
 
 class Reservation(TemplateBase):
@@ -43,13 +35,12 @@ class Reservation(TemplateBase):
         deploy_map = {
             'vm': self._install_vm,
             's3': self._install_s3,
+            'namespace': self._install_namespace,
+            'reverse_proxy': self._install_proxy,
         }
 
-        price = PRICE_MAP.get(self.data['type'], {}).get(self.data['size'])
-        if not price:
-            raise ValueError("unsupported reservation type %s size %s", self.data['type'], self.data['size'])
-
-        if self.data['amount'] < price:
+        amount = price(self.data['type'], self.data['size'])
+        if self.data['amount'] < amount:
             raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s",
                              self.data['amount'], price)
 
@@ -60,12 +51,6 @@ class Reservation(TemplateBase):
         install_result = install(self.data['size'])
         self.state.set('actions', 'install', 'ok')
         return install_result
-
-    def connection_info(self):
-        if self.data['type'] == 'vm':
-            return self._vm_connect_info()
-        elif self.data['type'] == 's3':
-            return self._s3_connect_info()
 
     def _install_vm(self, size):
         if size == 1:
@@ -83,7 +68,7 @@ class Reservation(TemplateBase):
         # as a farm name in the directory and if so, deploy on the least used node. else it is a
         # nodeID, so just try that for the deploy
         location = self.data['location']
-        nodeID = get_least_used_node_from_farm(location)
+        nodeID = get_least_used_node_from_farm_s3(location)
         if nodeID is not None:
             location = nodeID
 
@@ -95,13 +80,44 @@ class Reservation(TemplateBase):
             'memory': memory,
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
             'nodeId': location
-            # 'nodeId': 'ac1f6b272370'
         }
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
 
+        # save created service id
+        # used to delete the service during cleanup
+        self.data['createdServices'] = [{
+            'robot': 'local',
+            'id': vm.id,
+        }]
+
         return self._vm_connect_info()
+
+    def _vm_connect_info(self):
+        vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
+        if vm is None:
+            self.logger.error("Didn't find vm")
+            return
+
+        task = vm.schedule_action('info')
+        task.wait()
+        if task.state != 'ok':
+            self.logger.error("error retrieving vm connection info: \n%s", task.eco.trace)
+            return
+
+        info = task.result
+
+        vm_ip = info['zerotier']['ip']
+        host_ip = info['host']['public_addr']
+        robot_url = 'http://%s:6600' % vm_ip
+        zos_addr = "%s:6379" % vm_ip
+        vnc_addr = "%s:%s" % (host_ip, info['vnc'])
+        return {
+            'type': 'vm',
+            'robot_url': robot_url,
+            'zos_addr': zos_addr,
+            'vnc': vnc_addr}
 
     def _install_s3(self, size):
         if size == 1:
@@ -150,32 +166,29 @@ class Reservation(TemplateBase):
         reverse_proxy.schedule_action('install').wait(die=True)
         reverse_proxy.schedule_action('update_servers', args={'servers': [urls['public']]}).wait(die=True)
 
-        typ, urls, _, _, domain = self._s3_connect_info()
+        # save created services id
+        # used to delete the service during cleanup
+        self.data['createdServices'] = [
+            {
+                'robot': 'local',
+                'id': s3.id,
+            },
+            {
+                'robot': 'local',
+                'id': reverse_proxy.id,
+            },
+        ]
+
+        connection_info = self._s3_connect_info()
         # credentails need to be returned from the task since they are currently
         # different from the ones given when the S3 is created
         # See https://github.com/threefoldtech/0-templates/issues/303
-        return (typ, urls, credentials['login'], credentials['password'], domain)
-
-    def _vm_connect_info(self):
-        vm = self.api.services.get(template_uid=DMVM_GUID, name=self.data['txId'])
-        if vm is None:
-            self.logger.error("Didn't find vm")
-            return
-
-        task = vm.schedule_action('info')
-        task.wait()
-        if task.state != 'ok':
-            self.logger.error("error retrieving vm connection info: \n%s", task.eco.trace)
-            return
-
-        info = task.result
-
-        vm_ip = info['zerotier']['ip']
-        host_ip = info['host']['public_addr']
-        robot_url = 'http://%s:6600' % vm_ip
-        zos_addr = "%s:6379" % vm_ip
-        vnc_addr = "%s:%s" % (host_ip, info['vnc'])
-        return ('vm', robot_url, zos_addr, vnc_addr)
+        return {
+            'type': 's3',
+            'urls': connection_info['url'],
+            'login': credentials['login'],
+            'password': credentials['password'],
+            'domain': connection_info['domain']}
 
     def _s3_connect_info(self):
         s3 = self.api.services.get(template_uid=S3_GUID, name=self.data['txId'])
@@ -191,36 +204,103 @@ class Reservation(TemplateBase):
         urls = task.result
 
         rp = self.api.services.get(template_uid=REVERSE_PROXY_UID, name='rp-{}'.format(self.data['txId']))
+        return {
+            'type': 's3',
+            'url': urls['public'],
+            'login': s3.data['minioLogin_'],
+            'password': s3.data['minioPassword_'],
+            'domain': rp.data['domain']}
 
-        return ('s3', urls['public'], s3.data['minioLogin_'], s3.data['minioPassword_'], rp.data['domain'])
+    def _install_namespace(self):
+        location = self.data['location']
+        disk_type = self.data['diskType']
+        node_detail = capacity_planning_namespace(location, disk_type)
+        robot = self.api.robots.get(node_detail['node_id'], node_detail['robot_address'])
+
+        password = self.data['password'] if self.data['password'] else j.data.idgenerator.generateXCharID(16)
+
+        data = {
+            'size': self.data['size'],
+            'diskType': disk_type,
+            'mode': self.data['namespaceMode'],
+            'public': False,
+            'password': password,
+            'nsName': j.data.idgenerator.generateGUID(),
+        }
+        ns = robot.api.services.create(NAMESPACE_GUID, self.data['txId'], data)
+        ns.schedule_action('install').wait(die=True)
+        task = ns.schedule_action('connection_info').wait(die=True)
+        connection_info = task.result
+        self.logger.info("namespace %s installed", ns.name)
+
+        # save created service id
+        # used to delete the service during cleanup
+        self.data['createdServices'] = [{
+            'robot': node_detail['node_id'],
+            'id': ns.id,
+        }]
+
+        return {
+            'type': 'namespace',
+            'ip': connection_info['ip'],
+            'port': connection_info['port'],
+            'password': data['password'],
+            'nsName': data['nsName'],
+        }
+
+    def _install_proxy(self):
+        servers = self.data['backendUrls']
+        if not isinstance(servers, list):
+            servers = [servers]
+
+        data = {
+            'webGateway': self.data['webGateway'],
+            'domain': self.data['domain'],
+            'servers': servers,
+        }
+        reverse_proxy = self.api.services.find_or_create(REVERSE_PROXY_UID, self.data['txId'], data)
+        reverse_proxy.schedule_action('install').wait(die=True)
+
+        # save created service id
+        # used to delete the service during cleanup
+        self.data['createdServices'] = [{
+            'robot': 'local',
+            'id': reverse_proxy.id,
+        }]
+
+        wg = self.api.services.get(name=self.data['webGateway'])
+        return {
+            'type': 'reverse_proxy',
+            'domain': data['domain'],
+            'backends': data['servers'],
+            'ip': wg.data['publicIps'][0],  # for now only one, we might support multiple IP in the future
+        }
 
     def _cleanup(self):
         created = self.data['creationTimestamp']
-        now = int(time.time())
 
         if (time.time() - created) > WEEK:
             self.logger.info("reservation has expired, uninstalling")
-            tids = self._get_template_ids()
-            for tid in tids:
-                self._cleanup_service(tid[0], tid[1])
+            for created_service in self.data.get('createdServices', []):
+                self._cleanup_service(created_service['robot'], created_service['id'])
             self.state.set('actions', 'cleanup', 'ok')
 
-    def _get_template_ids(self):
-        if self.data['type'] == 'vm':
-            return [(self.data['txId'], 'dm_vm')]
-        elif self.data['type'] == 's3':
-            return [('rp-%s' % self.data['txId'], 'reverse_proxy'), (self.data['txId'], 's3')]
+    def _cleanup_service(self, robot, service_id):
+        if robot == 'local':
+            api = self.api
         else:
-            self.logger.error("Can't uninstall service type %s", self.data['type'])
+            api = self.api.robots.get(robot)
 
-    def _cleanup_service(self, name, template_name):
-        self.logger.info("uninstalling {template_name} - {name}".format(name=name, template_name=template_name))
         try:
-            service = self.api.services.get(name=name, template_name=template_name)
+            service = api.services.guids(service_id)
+            self.logger.info("uninstalling {template_name} - {name}".format(
+                name=service.name,
+                template_name=service.template_uid.name))
             service.schedule_action('uninstall').wait(die=True)
             service.delete()
         except ServiceNotFoundError:
             pass
+
 
 def _get_farm_nodes(farmname):
     """
@@ -228,13 +308,15 @@ def _get_farm_nodes(farmname):
     """
     return list(j.sal_zos.farm.get(farmname).filter_online_nodes())
 
-def get_least_used_node_from_farm(farmname):
+
+def get_least_used_node_from_farm_s3(farmname):
     """
     get the node ID of the least used node in a given farm based on cru/mru/sru
     """
     nodes = _get_farm_nodes(farmname)
     if not nodes:
         return
+
     def key(node):
         return (-node['total_resources']['cru'],
                 -node['total_resources']['mru'],
@@ -243,3 +325,75 @@ def get_least_used_node_from_farm(farmname):
                 node['used_resources']['mru'],
                 node['used_resources']['sru'])
     return sorted(nodes, key=key)[0]['node_id']
+
+
+def capacity_planning_namespace(location, disk_type):
+    """
+    get the node detail of the node or farm pointed by location
+    if location is a node id, return this node detail
+    if location is a farm name, return the least used node detail
+    """
+    if disk_type == 'ssd':
+        resource = 'sru'
+    elif disk_type == 'hdd':
+        resource = 'hru'
+    else:
+        raise ValueError("disk_type can only be 'ssd' or 'hdd'")
+
+    # first check if location is a node id
+    directory = j.clients.threefold_directory.get()
+    try:
+        _, resp = directory.api.GetCapacity(location)
+        return resp.json()
+    except HTTPError as err:
+        if err.response.status_code != 404:
+            raise err
+
+    # if it's not a node id, try as a farm name
+    nodes = _get_farm_nodes(location)
+    if not nodes:
+        raise ValueError("no nodes found in farm %s" % location)
+
+    def key(node):
+        return (-node['total_resources'][resource],
+                node['used_resources'][resource])
+    return sorted(nodes, key=key)[0]
+
+
+def price(typ, size):
+    if typ == 's3':
+        return s3_price(size)
+    elif typ == 'vm':
+        return vm_price(size)
+    elif typ == 'namespace':
+        return namespace_price(size)
+    elif typ == 'reverse_proxy':
+        return proxy_price(size)
+    else:
+        raise ValueError("unsupported reservation type")
+
+
+def s3_price(size):
+    if size == 1:
+        return 41650000000.0
+    elif size == 2:
+        return 83300000000.0
+    else:
+        raise ValueError("size for s3 can only be 1 or 2")
+
+
+def vm_price(size):
+    if size == 1:
+        return 41650000000.0
+    elif size == 2:
+        83300000000.0
+    else:
+        raise ValueError("size for vm can only be 1 or 2")
+
+
+def namespace_price(size):
+    return size * 83300000000.0
+
+
+def proxy_price(size):
+    return 10000000000
