@@ -48,6 +48,7 @@ class GridBroker(TemplateBase):
                 # refund if there is not data
                 if not data:
                     self._refund(tx)
+                    continue
             except Exception as err:
                 # malformed data, refund transaction, though we can't notify the person that this happened
                 self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
