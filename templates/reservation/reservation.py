@@ -4,6 +4,7 @@ from requests.exceptions import HTTPError
 
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
+from zerorobot.template.state import StateCheckError
 from zerorobot.template.decorator import retry
 from zerorobot.service_collection import ServiceNotFoundError
 
@@ -89,7 +90,7 @@ class Reservation(TemplateBase):
         # used to delete the service during cleanup
         self.data['createdServices'] = [{
             'robot': 'local',
-            'id': vm.id,
+            'id': vm.guid,
         }]
 
         return self._vm_connect_info()
@@ -171,11 +172,11 @@ class Reservation(TemplateBase):
         self.data['createdServices'] = [
             {
                 'robot': 'local',
-                'id': s3.id,
+                'id': s3.guid,
             },
             {
                 'robot': 'local',
-                'id': reverse_proxy.id,
+                'id': reverse_proxy.guid,
             },
         ]
 
@@ -211,7 +212,21 @@ class Reservation(TemplateBase):
             'password': s3.data['minioPassword_'],
             'domain': rp.data['domain']}
 
-    def _install_namespace(self):
+    def _install_namespace(self, size):
+        # convert enum number to string
+        #  see https://github.com/threefoldtech/jumpscaleX/blob/development/Jumpscale/clients/blockchain/tfchain/schemas/reservation_namespace.schema#L8
+        disk_type_map = {
+            1: 'hdd',
+            2: 'ssd',
+        }
+        mode_map = {
+            1: 'seq',
+            2: 'user',
+            3: 'direct',
+        }
+        self.data['diskType'] = disk_type_map[self.data['disk_type']]
+        self.data['namespaceMode'] = mode_map[self.data['mode']]
+
         location = self.data['location']
         disk_type = self.data['diskType']
         node_detail = capacity_planning_namespace(location, disk_type)
@@ -220,14 +235,14 @@ class Reservation(TemplateBase):
         password = self.data['password'] if self.data['password'] else j.data.idgenerator.generateXCharID(16)
 
         data = {
-            'size': self.data['size'],
+            'size': size,
             'diskType': disk_type,
             'mode': self.data['namespaceMode'],
             'public': False,
             'password': password,
             'nsName': j.data.idgenerator.generateGUID(),
         }
-        ns = robot.api.services.create(NAMESPACE_GUID, self.data['txId'], data)
+        ns = robot.services.create(NAMESPACE_GUID, self.data['txId'], data)
         ns.schedule_action('install').wait(die=True)
         task = ns.schedule_action('connection_info').wait(die=True)
         connection_info = task.result
@@ -237,7 +252,7 @@ class Reservation(TemplateBase):
         # used to delete the service during cleanup
         self.data['createdServices'] = [{
             'robot': node_detail['node_id'],
-            'id': ns.id,
+            'id': ns.guid,
         }]
 
         return {
@@ -248,7 +263,8 @@ class Reservation(TemplateBase):
             'nsName': data['nsName'],
         }
 
-    def _install_proxy(self):
+    def _install_proxy(self, *args, **kwargs):
+        self.data['backendUrls'] = self.data.pop('backend_urls')
         servers = self.data['backendUrls']
         if not isinstance(servers, list):
             servers = [servers]
@@ -265,7 +281,7 @@ class Reservation(TemplateBase):
         # used to delete the service during cleanup
         self.data['createdServices'] = [{
             'robot': 'local',
-            'id': reverse_proxy.id,
+            'id': reverse_proxy.guid,
         }]
 
         wg = self.api.services.get(name=self.data['webGateway'])
@@ -277,13 +293,16 @@ class Reservation(TemplateBase):
         }
 
     def _cleanup(self):
-        created = self.data['creationTimestamp']
+        try:
+            self.state.check('actions', 'cleanup', 'ok')
+        except StateCheckError:
+            created = self.data['creationTimestamp']
 
-        if (time.time() - created) > WEEK:
-            self.logger.info("reservation has expired, uninstalling")
-            for created_service in self.data.get('createdServices', []):
-                self._cleanup_service(created_service['robot'], created_service['id'])
-            self.state.set('actions', 'cleanup', 'ok')
+            if (time.time() - created) > WEEK:
+                self.logger.info("reservation has expired, uninstalling")
+                for created_service in self.data.get('createdServices', []):
+                    self._cleanup_service(created_service['robot'], created_service['id'])
+                self.state.set('actions', 'cleanup', 'ok')
 
     def _cleanup_service(self, robot, service_id):
         if robot == 'local':

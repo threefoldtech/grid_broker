@@ -16,7 +16,7 @@ struct Schema {
 
     # the list of service id created by this reservation
     # this is automaticallty filled
-    createdServices :List(CreatedService);
+    createdServices @12 :List(CreatedService);
 
     enum Type {
         vm @0;
@@ -25,7 +25,7 @@ struct Schema {
     }
 
     enum DiskType {
-        ssh @0;
+        ssd @0;
         hdd @1;
     }
 
