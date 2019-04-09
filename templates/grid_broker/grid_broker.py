@@ -156,7 +156,6 @@ class GridBroker(TemplateBase):
         data = self._get_data(key)
         if not data:
             return
-
         # base64 decode content and signature
         data['content'] = base64.b64decode(data.get('content', ""))
         data['content_signature'] = base64.b64decode(data.get('content_signature', ""))
@@ -264,7 +263,7 @@ _vm_template = """
 <html>
 
 <body>
-    <h1>You virtual 0-OS has been deployed</h1>
+    <h1>Your virtual 0-OS has been deployed</h1>
     <div class="content">
         <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
                 threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
@@ -284,7 +283,7 @@ _vm_template = """
 _s3_template = """
 <html>
 <body>
-    <h1>You S3 archive server has been deployed</h1>
+    <h1>Your S3 archive server has been deployed</h1>
     <div class="content">
         <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
                 threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
@@ -304,7 +303,7 @@ _s3_template = """
 _namespace_template = """
 <html>
 <body>
-    <h1>You 0-DB namespace has been deployed</h1>
+    <h1>Your 0-DB namespace has been deployed</h1>
     <div class="content">
         <p>Make sure you have joined the <a
                 href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835"
