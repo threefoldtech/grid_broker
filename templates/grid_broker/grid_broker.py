@@ -38,6 +38,7 @@ class GridBroker(TemplateBase):
         if 'processed' not in self.data:
             self.data['processed'] = {}
         self.logger.info("look for new incoming transactions")
+
         for tx in self._watcher.watch():
             if self.data['processed'].get(tx.id, False):
                 self.logger.info("tx %s already processed", tx.id)
@@ -68,11 +69,16 @@ class GridBroker(TemplateBase):
                     self._send_connection_info(data['email'], connection_info)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
-                self._refund(tx)
+
+                try:
+                    self._refund(tx)
+                except Exception as refund_err:
+                    self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
+
                 self._notify_user(
                     data['email'],
                     "Reservation failed",
-                    _refund_template.format(address=tx.from_addresses[0])
+                    _refund_template.format(address=tx.from_addresses[0], error=str(err))
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
@@ -344,6 +350,10 @@ _refund_template = """
     <h1>We could not complete your reservation at this time</h1>
     <div class="content">
         <p>Unfortunately, we could not complete your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
+    </div>
+    <div class="error">
+        <p>Error detail:</p>
+        <code>{error}</code>
     </div>
 </body>
 </html>
