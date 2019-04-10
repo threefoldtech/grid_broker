@@ -78,7 +78,7 @@ class GridBroker(TemplateBase):
                 self._notify_user(
                     data['email'],
                     "Reservation failed",
-                    _refund_template.format(address=tx.from_addresses[0], error=str(err))
+                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id)
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
@@ -352,8 +352,13 @@ _refund_template = """
         <p>Unfortunately, we could not complete your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
     </div>
     <div class="error">
-        <p>Error detail:</p>
-        <code>{error}</code>
+        <h3>Error detail:</h3>
+        <ul>
+            <li>
+                <p>transaction ID of the reservation: <em>{tx_id}</em></p>
+            </li>
+            <li>error: <code>{error}</code></li>
+        </ul>
     </div>
 </body>
 </html>
