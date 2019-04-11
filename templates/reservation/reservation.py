@@ -405,7 +405,7 @@ def vm_price(size):
     if size == 1:
         return 41650000000.0
     elif size == 2:
-        83300000000.0
+        return 83300000000.0
     else:
         raise ValueError("size for vm can only be 1 or 2")
 
