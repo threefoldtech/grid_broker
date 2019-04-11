@@ -118,7 +118,7 @@ class Reservation(TemplateBase):
             'type': 'vm',
             'robot_url': robot_url,
             'zos_addr': zos_addr,
-            'vnc': vnc_addr}
+            'vnc_addr': vnc_addr}
 
     def _install_s3(self, size):
         if size == 1:
