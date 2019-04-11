@@ -242,7 +242,7 @@ class Reservation(TemplateBase):
             'password': password,
             'nsName': j.data.idgenerator.generateGUID(),
         }
-        ns = robot.services.create(NAMESPACE_GUID, self.data['txId'], data)
+        ns = robot.services.find_or_create(NAMESPACE_GUID, self.data['txId'], data)
         ns.schedule_action('install').wait(die=True)
         task = ns.schedule_action('connection_info').wait(die=True)
         connection_info = task.result
