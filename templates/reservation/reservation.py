@@ -310,15 +310,15 @@ class Reservation(TemplateBase):
         else:
             api = self.api.robots.get(robot)
 
-        try:
-            service = api.services.guids(service_id)
-            self.logger.info("uninstalling {template_name} - {name}".format(
-                name=service.name,
-                template_name=service.template_uid.name))
-            service.schedule_action('uninstall').wait(die=True)
-            service.delete()
-        except ServiceNotFoundError:
-            pass
+
+        service = api.services.guids.get(service_id)
+        if not service:
+            return # service not found
+        self.logger.info("uninstalling {template_name} - {name}".format(
+            name=service.name,
+            template_name=service.template_uid.name))
+        service.schedule_action('uninstall').wait(die=True)
+        service.delete()
 
 
 def _get_farm_nodes(farmname):
