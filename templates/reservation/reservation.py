@@ -128,9 +128,9 @@ class Reservation(TemplateBase):
         else:
             raise ValueError('size can only be 1 or 2')
 
-        # for now only allow 'kristof-farm-s3'
-        if not self.data['location'] in ['kristof-farm-s3']:
-            raise ValueError('can only deploy s3 in kristof-farm-s3')
+        # for now only allow 'freefarm.s3-storage'
+        if not self.data['location'] in ['freefarm.s3-storage']:
+            raise ValueError('can only deploy s3 in freefarm.s3-storage')
 
         login = j.data.idgenerator.generateXCharID(8)
         password = j.data.idgenerator.generateXCharID(16)
