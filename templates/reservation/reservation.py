@@ -1,4 +1,6 @@
+import calendar
 import time
+from datetime import datetime
 
 from requests.exceptions import HTTPError
 
@@ -30,9 +32,22 @@ class Reservation(TemplateBase):
     def validate(self):
         if not self.data.get('creationTimestamp'):
             self.data['creationTimestamp'] = time.time()
+        if not self.data.get('expiryTimestamp'):
+            self.data['expiryTimestamp'] = time.time()
+
+    def extend(self, duration):
+        expiry = datetime.fromtimestamp(self.data["expiryTimestamp"])
+        month = expiry.month - 1 + duration
+        year = expiry.year + month // 12
+        month = month % 12 + 1
+        day = min(expiry.day, calendar.monthrange(year,month)[1])
+        extended = datetime(year, month, day, expiry.hour, expiry.minute, expiry.second, expiry.microsecond)
+        self.data["expiryTimestamp"] = int(time.mktime(extended.timetuple()))
+
+        return self.data["expiryTimestamp"]
 
     @retry((Exception), tries=4, delay=5, backoff=2, logger=None)
-    def install(self):
+    def install(self,duration):
         deploy_map = {
             'vm': self._install_vm,
             's3': self._install_s3,
@@ -50,6 +65,7 @@ class Reservation(TemplateBase):
             raise ValueError("unsupported reservation type %s size %s" % (self.data['type'], self.data['size']))
 
         install_result = install(self.data['size'])
+        self.extend(duration)
         self.state.set('actions', 'install', 'ok')
         return install_result
 
@@ -296,9 +312,8 @@ class Reservation(TemplateBase):
         try:
             self.state.check('actions', 'cleanup', 'ok')
         except StateCheckError:
-            created = self.data['creationTimestamp']
 
-            if (time.time() - created) > WEEK:
+            if time.time()  > self.data["expiryTimestamp"]:
                 self.logger.info("reservation has expired, uninstalling")
                 for created_service in self.data.get('createdServices', []):
                     self._cleanup_service(created_service['robot'], created_service['id'])

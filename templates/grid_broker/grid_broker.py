@@ -1,3 +1,4 @@
+from datetime import datetime
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
@@ -62,11 +63,29 @@ class GridBroker(TemplateBase):
 
             # try to deploy the reservation
             try:
-                connection_info = self._deploy(tx, data)
-                self.logger.info("transaction processed %s", tx.id)
-                # insert connection info into mail
-                if connection_info:
-                    self._send_connection_info(data['email'], connection_info)
+                if data["type"] == "extension":
+                    action = "extend"
+                    action_type = "extension"
+                    title = "Extending reservation failed"
+
+                    expiry_date = self._extend_reservation(tx, data)
+                    expiry_date = datetime.fromtimestamp(expiry_date)
+
+                    self._notify_user(
+                        data['email'],
+                        "Reservation extended",
+                        _extend_template.format(tx_id=data["transaction_id"], expiry=expiry_date.strftime("%d/%m/%y"))
+                    )
+                else:
+                    action = "complete"
+                    action_type = "reservation"
+                    title = "Reservation failed"
+
+                    connection_info = self._deploy(tx, data)
+                    self.logger.info("transaction processed %s", tx.id)
+                    # insert connection info into mail
+                    if connection_info:
+                        self._send_connection_info(data['email'], connection_info)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
 
@@ -77,12 +96,20 @@ class GridBroker(TemplateBase):
 
                 self._notify_user(
                     data['email'],
-                    "Reservation failed",
-                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id)
+                    title,
+                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id, action=action, type=action_type)
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
                 self.data['processed'][tx.id] = True
+
+    def _extend_reservation(self, tx, data):
+        self.logger.info(
+            "start processing transaction %s - %s", tx.id, tx.data)
+
+        s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
+        task = s.schedule_action('extend', {"duration": data["duration"]}).wait(die=True)
+        return task.result
 
     def _deploy(self, tx, data):
         self.logger.info(
@@ -90,7 +117,7 @@ class GridBroker(TemplateBase):
 
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
-            task = s.schedule_action('install').wait(die=True)
+            task = s.schedule_action('install', {"duration": data["duration"]}).wait(die=True)
             return task.result
         except ServiceConflictError:
             # skip the creation of the service since it already exists
@@ -347,18 +374,29 @@ _refund_template = """
 <html>
 
 <body>
-    <h1>We could not complete your reservation at this time</h1>
+    <h1>We could not {action} your reservation at this time</h1>
     <div class="content">
-        <p>Unfortunately, we could not complete your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
+        <p>Unfortunately, we could not {action} your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
     </div>
     <div class="error">
         <h3>Error detail:</h3>
         <ul>
             <li>
-                <p>transaction ID of the reservation: <em>{tx_id}</em></p>
+                <p>transaction ID of the {type}: <em>{tx_id}</em></p>
             </li>
             <li>error: <code>{error}</code></li>
         </ul>
+    </div>
+</body>
+</html>
+"""
+
+_extend_template = """
+<html>
+<body>
+    <h1>Your reservation {tx_id} has been extending successfully</h1>
+    <div class="content">
+        <p>The reservation's expiry date is {expiry}</em></p>
     </div>
 </body>
 </html>

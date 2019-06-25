@@ -13,6 +13,7 @@ struct Schema {
     password @9 :Text;
     domain @10 :Text;
     backendUrls @11 :List(Text);
+    expiryTimestamp @12 :Int32;
 
     # the list of service id created by this reservation
     # this is automaticallty filled
