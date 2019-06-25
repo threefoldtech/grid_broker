@@ -67,7 +67,7 @@ class Reservation(TemplateBase):
         install_result = install(self.data['size'])
         self.extend(duration)
         self.state.set('actions', 'install', 'ok')
-        return install_result
+        return install_result, self.data["expiryTimestamp"]
 
     def _install_vm(self, size):
         if size == 1:
