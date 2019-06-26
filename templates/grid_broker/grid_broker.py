@@ -4,7 +4,6 @@ from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 from nacl.signing import VerifyKey, SigningKey
 
-import calendar
 import time
 import requests
 import base64
