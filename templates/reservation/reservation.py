@@ -31,9 +31,13 @@ class Reservation(TemplateBase):
             if not self.data.get(key):
                 raise ValueError("%s is not set")
 
-    def extend(self, duration):
+    def extend(self, duration, bot_expiration):
         if self.data["expiryTimestamp"] < time.time():
-            raise RuntimeError("Reservation can't be extended after it has already expired")
+            raise ValueError("Reservation can't be extended after it has already expired")
+
+        extended = j.tools.time.extend(self.data["expiryTimestamp"], duration)
+        if extended > bot_expiration:
+            raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
         self.data["expiryTimestamp"] = j.tools.time.extend(self.data["expiryTimestamp"], duration)
         return {"expiryTimestamp": self.data["expiryTimestamp"], "type":self.data["type"]}

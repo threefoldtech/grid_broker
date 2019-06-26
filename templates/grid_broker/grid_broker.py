@@ -1,5 +1,6 @@
 from datetime import datetime
 from jumpscale import j
+from JumpscaleLib.clients.blockchain.tfchain.TfchainNetwork import TfchainNetwork
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 from nacl.signing import VerifyKey, SigningKey
@@ -20,13 +21,14 @@ class GridBroker(TemplateBase):
     def __init__(self, name, guid=None, data=None):
         super().__init__(name=name, guid=guid, data=data)
         self.recurring_action(self._watch_transactions, 60)
+        self._tfchain_client = j.clients.tfchain.get(self.data['wallet'])
         self._wallet_ = None
         self._watcher_ = None
 
     @property
     def _wallet(self):
         if self._wallet_ is None:
-            self._wallet_ = j.clients.tfchain.get(self.data['wallet']).wallet
+            self._wallet_ = self._tfchain_client.wallet
         return self._wallet_
 
     @property
@@ -109,9 +111,10 @@ class GridBroker(TemplateBase):
     def _extend_reservation(self, tx, data):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
-
+        bot_expiration = j.clients.tfchain.threebot.get_record(
+            data["threebot_id"], TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
         s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
-        task = s.schedule_action('extend', {"duration": data["duration"]}).wait(die=True)
+        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration}).wait(die=True)
         expiry_date = datetime.fromtimestamp(task.result["expiryTimestamp"])
 
         return expiry_date.strftime("%d/%m/%y"), task.result["type"]
@@ -128,8 +131,9 @@ class GridBroker(TemplateBase):
             task = s.schedule_action('install').wait(die=True)
             expiry_date = datetime.fromtimestamp(data["expiryTimestamp"])
             expiry_date.strftime("%d/%m/%y")
-            task.result["expiry"] = expiry_date
-            return task.result
+            info = task.result
+            info["expiry"] = expiry_date
+            return info
         except ServiceConflictError:
             # skip the creation of the service since it already exists
             pass
