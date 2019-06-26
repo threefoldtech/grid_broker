@@ -4,6 +4,7 @@ from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 from nacl.signing import VerifyKey, SigningKey
 
+import calendar
 import time
 import requests
 import base64
@@ -49,6 +50,7 @@ class GridBroker(TemplateBase):
                 data = self._parse_tx_data(tx)
                 # refund if there is not data
                 if not data:
+                    self.logger.info("no data found")
                     self._refund(tx)
                     continue
             except Exception as err:
@@ -68,39 +70,38 @@ class GridBroker(TemplateBase):
                     action_type = "extension"
                     title = "Extending reservation failed"
 
-                    expiry_date = self._extend_reservation(tx, data)
-                    expiry_date = datetime.fromtimestamp(expiry_date)
+                    expiry_date, res_type = self._extend_reservation(tx, data)
 
                     self._notify_user(
                         data['email'],
                         "Reservation extended",
-                        _extend_template.format(tx_id=data["transaction_id"], expiry=expiry_date.strftime("%d/%m/%y"))
+                        _extend_template.format(tx_id=data["transaction_id"], expiry=expiry_date, type=res_type)
                     )
                 else:
                     action = "complete"
                     action_type = "reservation"
                     title = "Reservation failed"
 
-                    connection_info, expiry_date = self._deploy(tx, data)
-                    expiry_date = datetime.fromtimestamp(expiry_date)
+                    info = self._deploy(tx, data)
 
                     self.logger.info("transaction processed %s", tx.id)
                     # insert connection info into mail
-                    if connection_info:
-                        connection_info["expiry"] = expiry_date
-                        self._send_connection_info(data['email'], connection_info)
+                    if info:
+                        self._send_connection_info(data['email'], info)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
 
+                refund_status = "failed to refund"
                 try:
                     self._refund(tx)
+                    refund_status = "was refunded"
                 except Exception as refund_err:
                     self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
 
                 self._notify_user(
                     data['email'],
                     title,
-                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id, action=action, type=action_type)
+                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id, action=action, type=action_type, refund_status=refund_status)
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
@@ -112,15 +113,23 @@ class GridBroker(TemplateBase):
 
         s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
         task = s.schedule_action('extend', {"duration": data["duration"]}).wait(die=True)
-        return task.result
+        expiry_date = datetime.fromtimestamp(task.result["expiryTimestamp"])
+
+        return expiry_date.strftime("%d/%m/%y"), task.result["type"]
 
     def _deploy(self, tx, data):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
 
+        data["creationTimestamp"] = time.time()
+        data["expiryTimestamp"] = j.tools.time.extend(data["creationTimestamp"], data["duration"])
+
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
-            task = s.schedule_action('install', {"duration": data["duration"]}).wait(die=True)
+            task = s.schedule_action('install').wait(die=True)
+            expiry_date = datetime.fromtimestamp(data["expiryTimestamp"])
+            expiry_date.strftime("%d/%m/%y")
+            task.result["expiry"] = expiry_date
             return task.result
         except ServiceConflictError:
             # skip the creation of the service since it already exists
@@ -379,7 +388,7 @@ _refund_template = """
 <body>
     <h1>We could not {action} your reservation at this time</h1>
     <div class="content">
-        <p>Unfortunately, we could not {action} your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
+        <p>Unfortunately, we could not {action} your reservation. Your reservation {refund_status} to {address}. Please try again at a later time</p>
     </div>
     <div class="error">
         <h3>Error detail:</h3>
@@ -397,7 +406,7 @@ _refund_template = """
 _extend_template = """
 <html>
 <body>
-    <h1>Your reservation {tx_id} has been extending successfully</h1>
+    <h1>Your reservation {tx_id} of type {type} has been extending successfully</h1>
     <div class="content">
         <p>The reservation's expiry date is {expiry}</em></p>
     </div>

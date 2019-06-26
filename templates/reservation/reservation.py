@@ -1,7 +1,4 @@
-import calendar
 import time
-from datetime import datetime
-
 from requests.exceptions import HTTPError
 
 from jumpscale import j
@@ -30,21 +27,16 @@ class Reservation(TemplateBase):
         self.recurring_action(self._cleanup, 3600*12)  # 12h
 
     def validate(self):
-        if not self.data.get('creationTimestamp'):
-            self.data['creationTimestamp'] = time.time()
-        if not self.data.get('expiryTimestamp'):
-            self.data['expiryTimestamp'] = time.time()
+        for key in ['creationTimestamp', 'expiryTimestamp']:
+            if not self.data.get(key):
+                raise ValueError("%s is not set")
 
     def extend(self, duration):
-        expiry = datetime.fromtimestamp(self.data["expiryTimestamp"])
-        month = expiry.month - 1 + duration
-        year = expiry.year + month // 12
-        month = month % 12 + 1
-        day = min(expiry.day, calendar.monthrange(year,month)[1])
-        extended = datetime(year, month, day, expiry.hour, expiry.minute, expiry.second, expiry.microsecond)
-        self.data["expiryTimestamp"] = int(time.mktime(extended.timetuple()))
+        if self.data["expiryTimestamp"] < time.time():
+            raise RuntimeError("Reservation can't be extended after it has already expired")
 
-        return self.data["expiryTimestamp"]
+        self.data["expiryTimestamp"] = j.tools.time.extend(self.data["expiryTimestamp"], duration)
+        return {"expiryTimestamp": self.data["expiryTimestamp"], "type":self.data["type"]}
 
     @retry((Exception), tries=4, delay=5, backoff=2, logger=None)
     def install(self,duration):
@@ -65,9 +57,8 @@ class Reservation(TemplateBase):
             raise ValueError("unsupported reservation type %s size %s" % (self.data['type'], self.data['size']))
 
         install_result = install(self.data['size'])
-        self.extend(duration)
         self.state.set('actions', 'install', 'ok')
-        return install_result, self.data["expiryTimestamp"]
+        return install_result
 
     def _install_vm(self, size):
         if size == 1:
