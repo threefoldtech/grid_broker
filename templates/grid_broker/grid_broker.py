@@ -406,7 +406,7 @@ _refund_template = """
 _extend_template = """
 <html>
 <body>
-    <h1>Your reservation {tx_id} of type {type} has been extending successfully</h1>
+    <h1>Your reservation {tx_id} of type {type} has been extended successfully</h1>
     <div class="content">
         <p>The reservation's expiry date is {expiry}</em></p>
     </div>
