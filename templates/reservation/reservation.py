@@ -39,7 +39,7 @@ class Reservation(TemplateBase):
         if extended > bot_expiration:
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
-        self.data["expiryTimestamp"] = j.tools.time.extend(self.data["expiryTimestamp"], duration)
+        self.data["expiryTimestamp"] = extended
         return {"expiryTimestamp": self.data["expiryTimestamp"], "type":self.data["type"]}
 
     @retry((Exception), tries=4, delay=5, backoff=2, logger=None)
