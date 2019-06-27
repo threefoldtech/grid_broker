@@ -20,10 +20,10 @@ class GridBroker(TemplateBase):
 
     def __init__(self, name, guid=None, data=None):
         super().__init__(name=name, guid=guid, data=data)
-        self.recurring_action(self._watch_transactions, 60)
         self._tfchain_client = j.clients.tfchain.get(self.data['wallet'])
         self._wallet_ = None
         self._watcher_ = None
+        self.recurring_action(self._watch_transactions, 60)
 
     @property
     def _wallet(self):
@@ -48,18 +48,25 @@ class GridBroker(TemplateBase):
                 continue
             # try to parse the transaction data
             try:
+                malformed = True
                 data = self._parse_tx_data(tx)
+                malformed = False
                 # refund if there is not data
                 if not data:
-                    self.logger.info("no data found")
-                    self._refund(tx)
-                    continue
+                    self.logger.info("no data found in transaction %s", tx.id)
+                    raise ValueError("transaction has no data")
             except Exception as err:
-                # malformed data, refund transaction, though we can't notify the person that this happened
-                self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
-                self._refund(tx)
-                self.data['processed'][tx.id] = True
-                continue
+                if malformed:
+                    # malformed data, refund transaction, though we can't notify the person that this happened
+                    self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
+                try:
+                    self._refund(tx)
+                    self.data['processed'][tx.id] = True
+                    continue
+                except Exception as refund_err:
+                    self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
+                    self.data['processed'][tx.id] = True
+                    continue
 
             # add webgateway we want to use
             data['webGateway'] = self.data['webGateway']
