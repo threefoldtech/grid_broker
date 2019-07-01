@@ -26,12 +26,36 @@ class Reservation(TemplateBase):
         super().__init__(name=name, guid=guid, data=data)
         self.recurring_action(self._cleanup, 3600*12)  # 12h
 
+    def _migrate_service_expiry(self):
+        if self.data.get('creationTimestamp') and not self.data.get('expiryTimestamp'):
+            try:
+                self.state.check('actions', 'install', 'ok')
+                try:
+                    self.state.check('actions', 'cleanup', 'ok')
+                    # service has already been cleaned up, no need to migrate
+                    return
+                except StateCheckError:
+                    # this is an old service, set the expiry date to 1 month
+                    self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], '1')
+            except StateCheckError:
+                # this is not an old service
+                return
+
     def validate(self):
+        # Check if this is an old installed service and if we need to set the expiryTimestamp
+        self._migrate_service_expiry()
+
         for key in ['creationTimestamp', 'expiryTimestamp']:
             if not self.data.get(key):
                 raise ValueError("%s is not set")
 
     def extend(self, duration, bot_expiration):
+        try:
+            self.state.check('actions', 'cleanup', 'ok')
+            raise ValueError("Reservation can't be extended after it has already expired")
+        except StateCheckError:
+            pass
+
         if self.data["expiryTimestamp"] < time.time():
             raise ValueError("Reservation can't be extended after it has already expired")
 
