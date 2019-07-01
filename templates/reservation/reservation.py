@@ -1,6 +1,6 @@
 import time
 from requests.exceptions import HTTPError
-
+from datetime import date
 from jumpscale import j
 from zerorobot.template.base import TemplateBase
 from zerorobot.template.state import StateCheckError
@@ -36,14 +36,14 @@ class Reservation(TemplateBase):
             raise ValueError("Reservation can't be extended after it has already expired")
 
         extended = j.tools.time.extend(self.data["expiryTimestamp"], duration)
-        if extended > bot_expiration:
+        if date.fromtimestamp(extended) > date.fromtimestamp(bot_expiration):
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
         self.data["expiryTimestamp"] = extended
         return {"expiryTimestamp": self.data["expiryTimestamp"], "type":self.data["type"]}
 
     @retry((Exception), tries=4, delay=5, backoff=2, logger=None)
-    def install(self,duration):
+    def install(self):
         deploy_map = {
             'vm': self._install_vm,
             's3': self._install_s3,

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date
 from jumpscale import j
 from JumpscaleLib.clients.blockchain.tfchain.TfchainNetwork import TfchainNetwork
 from zerorobot.template.base import TemplateBase
@@ -49,12 +49,11 @@ class GridBroker(TemplateBase):
             # try to parse the transaction data
             try:
                 malformed = True
-                data = self._parse_tx_data(tx)
+                threebot_id, data = self._parse_tx_data(tx)
                 malformed = False
                 # refund if there is not data
                 if not data:
-                    self.logger.info("no data found in transaction %s", tx.id)
-                    raise ValueError("transaction has no data")
+                    raise ValueError("Parsing transaction %s returned no data", tx.id)
             except Exception as err:
                 if malformed:
                     # malformed data, refund transaction, though we can't notify the person that this happened
@@ -78,7 +77,7 @@ class GridBroker(TemplateBase):
                     action_type = "extension"
                     title = "Extending reservation failed"
 
-                    expiry_date, res_type = self._extend_reservation(tx, data)
+                    expiry_date, res_type = self._extend_reservation(tx, data, threebot_id)
 
                     self._notify_user(
                         data['email'],
@@ -90,7 +89,7 @@ class GridBroker(TemplateBase):
                     action_type = "reservation"
                     title = "Reservation failed"
 
-                    info = self._deploy(tx, data)
+                    info = self._deploy(tx, data, threebot_id)
 
                     self.logger.info("transaction processed %s", tx.id)
                     # insert connection info into mail
@@ -115,28 +114,35 @@ class GridBroker(TemplateBase):
                 # even if a deploy errors, we refund so it is considered processed
                 self.data['processed'][tx.id] = True
 
-    def _extend_reservation(self, tx, data):
+    def _extend_reservation(self, tx, data, threebot_id):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
         bot_expiration = j.clients.tfchain.threebot.get_record(
-            data["threebot_id"], TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
+            threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
+
         s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
         task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration}).wait(die=True)
-        expiry_date = datetime.fromtimestamp(task.result["expiryTimestamp"])
+        expiry_date = date.fromtimestamp(task.result["expiryTimestamp"])
 
         return expiry_date.strftime("%d/%m/%y"), task.result["type"]
 
-    def _deploy(self, tx, data):
+    def _deploy(self, tx, data, threebot_id):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
 
         data["creationTimestamp"] = time.time()
         data["expiryTimestamp"] = j.tools.time.extend(data["creationTimestamp"], data["duration"])
 
+        # check if the reservation expiration exceeds the 3bot expiration before creating the reservation
+        bot_expiration = j.clients.tfchain.threebot.get_record(
+            threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
+        if date.fromtimestamp(data["expiryTimestamp"]) > date.fromtimestamp(bot_expiration):
+            raise ValueError("Reservation expiration can't exceed 3bot expiration")
+
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
             task = s.schedule_action('install').wait(die=True)
-            expiry_date = datetime.fromtimestamp(data["expiryTimestamp"])
+            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
             expiry_date.strftime("%d/%m/%y")
             info = task.result
             info["expiry"] = expiry_date
@@ -205,11 +211,13 @@ class GridBroker(TemplateBase):
         """
         data_key = tx.data
         if not data_key:
+            self.logger.info("no data key found in transaction %s", tx.id)
             return
         key = data_key.decode('utf-8')
 
         data = self._get_data(key)
         if not data:
+            self.logger.info("no data found in transaction %s", tx.id)
             return
         # base64 decode content and signature
         data['content'] = base64.b64decode(data.get('content', ""))
@@ -218,11 +226,13 @@ class GridBroker(TemplateBase):
         # verify signature
         verification_key = self._get_3bot_key(data['threebot_id'])
         if not self._verify_signature(verification_key, data['content'], data['content_signature']):
+            self.logger.info("fail to verify transaction %s content signature", tx.id)
             return
 
         # decrypt data
         signing_key = self._wallet.private_key(tx.to_address)
         if not signing_key:
+            self.logger.info("fail to get signing key for transaction %s", tx.id)
             return
         # ed25519 private keys actually hold an appended copy of the pub key, we only care for the first 32 bytes
         signing_key = SigningKey(signing_key[:32])
@@ -231,7 +241,7 @@ class GridBroker(TemplateBase):
         data_dict = j.data.serializer.msgpack.loads(decrypted_data)
         data_dict['txId'] = tx.id
         data_dict['amount'] = tx.amount
-        return data_dict
+        return data['threebot_id'], data_dict
 
     def _get_data(self, key):
         """
