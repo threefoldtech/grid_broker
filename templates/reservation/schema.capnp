@@ -13,11 +13,11 @@ struct Schema {
     password @9 :Text;
     domain @10 :Text;
     backendUrls @11 :List(Text);
-    expiryTimestamp @12 :Int32;
 
     # the list of service id created by this reservation
     # this is automaticallty filled
     createdServices @12 :List(CreatedService);
+    expiryTimestamp @13 :Int32;
 
     enum Type {
         vm @0;

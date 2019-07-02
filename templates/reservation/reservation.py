@@ -36,7 +36,7 @@ class Reservation(TemplateBase):
                     return
                 except StateCheckError:
                     # this is an old service, set the expiry date to 1 month
-                    self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], '1')
+                    self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], 1)
             except StateCheckError:
                 # this is not an old service
                 return

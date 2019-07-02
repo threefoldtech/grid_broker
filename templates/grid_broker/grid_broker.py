@@ -48,24 +48,20 @@ class GridBroker(TemplateBase):
                 continue
             # try to parse the transaction data
             try:
-                malformed = True
                 threebot_id, data = self._parse_tx_data(tx)
-                malformed = False
                 # refund if there is not data
                 if not data:
                     raise ValueError("Parsing transaction %s returned no data", tx.id)
             except Exception as err:
-                if malformed:
-                    # malformed data, refund transaction, though we can't notify the person that this happened
-                    self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
+                # malformed or empty data, refund transaction, though we can't notify the person that this happened
+                self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
                 try:
                     self._refund(tx)
-                    self.data['processed'][tx.id] = True
-                    continue
                 except Exception as refund_err:
                     self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
-                    self.data['processed'][tx.id] = True
-                    continue
+
+                self.data['processed'][tx.id] = True
+                continue
 
             # add webgateway we want to use
             data['webGateway'] = self.data['webGateway']
@@ -142,10 +138,9 @@ class GridBroker(TemplateBase):
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
             task = s.schedule_action('install').wait(die=True)
-            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
-            expiry_date.strftime("%d/%m/%y")
             info = task.result
-            info["expiry"] = expiry_date
+            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
+            info["expiry"] = expiry_date.strftime("%d/%m/%y")
             return info
         except ServiceConflictError:
             # skip the creation of the service since it already exists
