@@ -60,6 +60,7 @@ class GridBroker(TemplateBase):
                 except Exception as refund_err:
                     self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
 
+                self.logger.info("done processing transaction %s", tx.id)
                 self.data['processed'][tx.id] = True
                 continue
 
@@ -108,6 +109,7 @@ class GridBroker(TemplateBase):
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
+                self.logger.info("done processing transaction %s", tx.id)
                 self.data['processed'][tx.id] = True
 
     def _extend_reservation(self, tx, data, threebot_id):
