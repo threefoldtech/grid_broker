@@ -1,4 +1,6 @@
+from datetime import date
 from jumpscale import j
+from JumpscaleLib.clients.blockchain.tfchain.TfchainNetwork import TfchainNetwork
 from zerorobot.template.base import TemplateBase
 from zerorobot.service_collection import ServiceConflictError
 from nacl.signing import VerifyKey, SigningKey
@@ -18,14 +20,15 @@ class GridBroker(TemplateBase):
 
     def __init__(self, name, guid=None, data=None):
         super().__init__(name=name, guid=guid, data=data)
-        self.recurring_action(self._watch_transactions, 60)
+        self._tfchain_client = j.clients.tfchain.get(self.data['wallet'])
         self._wallet_ = None
         self._watcher_ = None
+        self.recurring_action(self._watch_transactions, 60)
 
     @property
     def _wallet(self):
         if self._wallet_ is None:
-            self._wallet_ = j.clients.tfchain.get(self.data['wallet']).wallet
+            self._wallet_ = self._tfchain_client.wallet
         return self._wallet_
 
     @property
@@ -45,15 +48,18 @@ class GridBroker(TemplateBase):
                 continue
             # try to parse the transaction data
             try:
-                data = self._parse_tx_data(tx)
+                threebot_id, data = self._parse_tx_data(tx)
                 # refund if there is not data
                 if not data:
-                    self._refund(tx)
-                    continue
+                    raise ValueError("Parsing transaction %s returned no data", tx.id)
             except Exception as err:
-                # malformed data, refund transaction, though we can't notify the person that this happened
+                # malformed or empty data, refund transaction, though we can't notify the person that this happened
                 self.logger.info("error parsing transaction data of tx %s: %s", tx.id, str(err))
-                self._refund(tx)
+                try:
+                    self._refund(tx)
+                except Exception as refund_err:
+                    self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
+
                 self.data['processed'][tx.id] = True
                 continue
 
@@ -62,36 +68,80 @@ class GridBroker(TemplateBase):
 
             # try to deploy the reservation
             try:
-                connection_info = self._deploy(tx, data)
-                self.logger.info("transaction processed %s", tx.id)
-                # insert connection info into mail
-                if connection_info:
-                    self._send_connection_info(data['email'], connection_info)
+                if data["type"] == "extension":
+                    action = "extend"
+                    action_type = "extension"
+                    title = "Extending reservation failed"
+
+                    expiry_date, res_type = self._extend_reservation(tx, data, threebot_id)
+
+                    self._notify_user(
+                        data['email'],
+                        "Reservation extended",
+                        _extend_template.format(tx_id=data["transaction_id"], expiry=expiry_date, type=res_type)
+                    )
+                else:
+                    action = "complete"
+                    action_type = "reservation"
+                    title = "Reservation failed"
+
+                    info = self._deploy(tx, data, threebot_id)
+
+                    self.logger.info("transaction processed %s", tx.id)
+                    # insert connection info into mail
+                    if info:
+                        self._send_connection_info(data['email'], info)
             except Exception as err:
                 self.logger.error("error processing transation %s: %s", tx.id, str(err))
 
+                refund_status = "failed to refund"
                 try:
                     self._refund(tx)
+                    refund_status = "was refunded"
                 except Exception as refund_err:
                     self.logger.error("fail to refund transaction %s: %s", tx.id, str(refund_err))
 
                 self._notify_user(
                     data['email'],
-                    "Reservation failed",
-                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id)
+                    title,
+                    _refund_template.format(address=tx.from_addresses[0], error=str(err), tx_id=tx.id, action=action, type=action_type, refund_status=refund_status)
                 )
             finally:
                 # even if a deploy errors, we refund so it is considered processed
                 self.data['processed'][tx.id] = True
 
-    def _deploy(self, tx, data):
+    def _extend_reservation(self, tx, data, threebot_id):
         self.logger.info(
             "start processing transaction %s - %s", tx.id, tx.data)
+        bot_expiration = j.clients.tfchain.threebot.get_record(
+            threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
+
+        s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
+        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration}).wait(die=True)
+        expiry_date = date.fromtimestamp(task.result["expiryTimestamp"])
+
+        return expiry_date.strftime("%d/%m/%y"), task.result["type"]
+
+    def _deploy(self, tx, data, threebot_id):
+        self.logger.info(
+            "start processing transaction %s - %s", tx.id, tx.data)
+
+        data["creationTimestamp"] = time.time()
+        data["expiryTimestamp"] = j.tools.time.extend(data["creationTimestamp"], data["duration"])
+
+        # check if the reservation expiration exceeds the 3bot expiration before creating the reservation
+        bot_expiration = j.clients.tfchain.threebot.get_record(
+            threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
+        if date.fromtimestamp(data["expiryTimestamp"]) > date.fromtimestamp(bot_expiration):
+            raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
         try:
             s = self.api.services.create(RESERVATION_UID, tx.id, data)
             task = s.schedule_action('install').wait(die=True)
-            return task.result
+            info = task.result
+            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
+            info["expiry"] = expiry_date.strftime("%d/%m/%y")
+            return info
         except ServiceConflictError:
             # skip the creation of the service since it already exists
             pass
@@ -156,11 +206,13 @@ class GridBroker(TemplateBase):
         """
         data_key = tx.data
         if not data_key:
+            self.logger.info("no data key found in transaction %s", tx.id)
             return
         key = data_key.decode('utf-8')
 
         data = self._get_data(key)
         if not data:
+            self.logger.info("no data found in transaction %s", tx.id)
             return
         # base64 decode content and signature
         data['content'] = base64.b64decode(data.get('content', ""))
@@ -169,11 +221,13 @@ class GridBroker(TemplateBase):
         # verify signature
         verification_key = self._get_3bot_key(data['threebot_id'])
         if not self._verify_signature(verification_key, data['content'], data['content_signature']):
+            self.logger.info("fail to verify transaction %s content signature", tx.id)
             return
 
         # decrypt data
         signing_key = self._wallet.private_key(tx.to_address)
         if not signing_key:
+            self.logger.info("fail to get signing key for transaction %s", tx.id)
             return
         # ed25519 private keys actually hold an appended copy of the pub key, we only care for the first 32 bytes
         signing_key = SigningKey(signing_key[:32])
@@ -182,7 +236,7 @@ class GridBroker(TemplateBase):
         data_dict = j.data.serializer.msgpack.loads(decrypted_data)
         data_dict['txId'] = tx.id
         data_dict['amount'] = tx.amount
-        return data_dict
+        return data['threebot_id'], data_dict
 
     def _get_data(self, key):
         """
@@ -269,7 +323,7 @@ _vm_template = """
 <html>
 
 <body>
-    <h1>Your virtual 0-OS has been deployed</h1>
+    <h1>Your virtual 0-OS has been deployed and expires on {expiry}</h1>
     <div class="content">
         <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
                 threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
@@ -289,7 +343,7 @@ _vm_template = """
 _s3_template = """
 <html>
 <body>
-    <h1>Your S3 archive server has been deployed</h1>
+    <h1>Your S3 archive server has been deployed and expires on {expiry}</h1>
     <div class="content">
         <p>Make sure you have joined the <a href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835">public
                 threefold zerotier network</a> : <em>9bee8941b5717835</em></p>
@@ -309,7 +363,7 @@ _s3_template = """
 _namespace_template = """
 <html>
 <body>
-    <h1>Your 0-DB namespace has been deployed</h1>
+    <h1>Your 0-DB namespace has been deployed and expires on {expiry}</h1>
     <div class="content">
         <p>Make sure you have joined the <a
                 href="https://github.com/threefoldtech/home/blob/master/docs/threefold_grid/networks.md#public-threefold-network-9bee8941b5717835"
@@ -335,7 +389,7 @@ _namespace_template = """
 _proxy_template = """
 <html>
 <body>
-    <h1>Your reverse_proxy has been deployed</h1>
+    <h1>Your reverse_proxy has been deployed and expires on {expiry}</h1>
     <div class="content">
         <p>Make sure that you have pointed your DNS configuration for the domain {domain} to the IP address: <em>{ip}</em></p>
     </div>
@@ -347,18 +401,29 @@ _refund_template = """
 <html>
 
 <body>
-    <h1>We could not complete your reservation at this time</h1>
+    <h1>We could not {action} your reservation at this time</h1>
     <div class="content">
-        <p>Unfortunately, we could not complete your reservation. We will refund your reservation to {address}. Please try again at a later time</p>
+        <p>Unfortunately, we could not {action} your reservation. Your reservation {refund_status} to {address}. Please try again at a later time</p>
     </div>
     <div class="error">
         <h3>Error detail:</h3>
         <ul>
             <li>
-                <p>transaction ID of the reservation: <em>{tx_id}</em></p>
+                <p>transaction ID of the {type}: <em>{tx_id}</em></p>
             </li>
             <li>error: <code>{error}</code></li>
         </ul>
+    </div>
+</body>
+</html>
+"""
+
+_extend_template = """
+<html>
+<body>
+    <h1>Your reservation {tx_id} of type {type} has been extended successfully</h1>
+    <div class="content">
+        <p>The reservation's expiry date is {expiry}</em></p>
     </div>
 </body>
 </html>

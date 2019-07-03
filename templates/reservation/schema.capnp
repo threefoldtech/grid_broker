@@ -17,6 +17,7 @@ struct Schema {
     # the list of service id created by this reservation
     # this is automaticallty filled
     createdServices @12 :List(CreatedService);
+    expiryTimestamp @13 :Int32;
 
     enum Type {
         vm @0;
