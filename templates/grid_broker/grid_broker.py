@@ -137,18 +137,13 @@ class GridBroker(TemplateBase):
         if date.fromtimestamp(data["expiryTimestamp"]) > date.fromtimestamp(bot_expiration):
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
-        try:
-            s = self.api.services.create(RESERVATION_UID, tx.id, data)
-            task = s.schedule_action('install').wait(die=True)
-            info = task.result
-            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
-            info["expiry"] = expiry_date.strftime("%d/%m/%y")
-            return info
-        except ServiceConflictError:
-            # skip the creation of the service since it already exists
-            pass
-        finally:
-            self.save()
+        s = self.api.services.find_or_create(RESERVATION_UID, tx.id, data)
+        task = s.schedule_action('install').wait(die=True)
+        info = task.result
+        expiry_date = date.fromtimestamp(data["expiryTimestamp"])
+        info["expiry"] = expiry_date.strftime("%d/%m/%y")
+        self.save()
+        return info
 
     def _refund(self, tx):
         if not tx.amount > DEFAULT_MINERFEE:

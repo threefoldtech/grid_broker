@@ -88,7 +88,7 @@ class Reservation(TemplateBase):
         self.state.set('actions', 'install', 'ok')
         return install_result
 
-    def _install_vm(self, size):
+    def _install_vm(self, size, password):
         if size == 1:
             cpu = 1
             memory = 2048
@@ -112,7 +112,7 @@ class Reservation(TemplateBase):
             'cpu': cpu,
             'disks': [{'diskType': 'ssd', 'label': 'cache', 'size': disk}],
             'image': 'zero-os:master',
-            'kernelArgs': [{'key': 'development', 'name': 'developmet'}],
+            'kernelArgs': [{'key': 'development', 'name': 'developmet'}, {'key': 'password', 'name': 'password', 'value': password}],
             'memory': memory,
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
             'nodeId': location
@@ -155,7 +155,7 @@ class Reservation(TemplateBase):
             'zos_addr': zos_addr,
             'vnc_addr': vnc_addr}
 
-    def _install_s3(self, size):
+    def _install_s3(self, size, *args, **kwargs):
         if size == 1:
             disk = 500
         elif size == 2:
@@ -247,7 +247,7 @@ class Reservation(TemplateBase):
             'password': s3.data['minioPassword_'],
             'domain': rp.data['domain']}
 
-    def _install_namespace(self, size):
+    def _install_namespace(self, size, *args, **kwargs):
         # convert enum number to string
         #  see https://github.com/threefoldtech/jumpscaleX/blob/development/Jumpscale/clients/blockchain/tfchain/schemas/reservation_namespace.schema#L8
         disk_type_map = {
