@@ -129,7 +129,7 @@ class GridBroker(TemplateBase):
             "start processing transaction %s - %s", tx.id, tx.data)
 
         data["creationTimestamp"] = time.time()
-        data["expiryTimestamp"] = j.tools.time.extend(data["creationTimestamp"], data["duration"])
+        data["expiryTimestamp"] = j.clients.tfchain.time.extend(data["creationTimestamp"], data["duration"])
 
         # check if the reservation expiration exceeds the 3bot expiration before creating the reservation
         bot_expiration = j.clients.tfchain.threebot.get_record(

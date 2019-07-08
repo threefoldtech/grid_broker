@@ -36,7 +36,7 @@ class Reservation(TemplateBase):
                     return
                 except StateCheckError:
                     # this is an old service, set the expiry date to 1 month
-                    self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], 1)
+                    self.data['expiryTimestamp'] = j.clients.tfchain.time.extend(self.data['creationTimestamp'], 1)
             except StateCheckError:
                 # this is not an old service
                 return
@@ -59,7 +59,7 @@ class Reservation(TemplateBase):
         if self.data["expiryTimestamp"] < time.time():
             raise ValueError("Reservation can't be extended after it has already expired")
 
-        extended = j.tools.time.extend(self.data["expiryTimestamp"], duration)
+        extended = j.clients.tfchain.time.extend(self.data["expiryTimestamp"], duration)
         if date.fromtimestamp(extended) > date.fromtimestamp(bot_expiration):
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
