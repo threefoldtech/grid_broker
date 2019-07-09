@@ -119,7 +119,7 @@ class GridBroker(TemplateBase):
             threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
 
         s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
-        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration}).wait(die=True)
+        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration, "tx_amount": data["amount"]}).wait(die=True)
         expiry_date = date.fromtimestamp(task.result["expiryTimestamp"])
 
         return expiry_date.strftime("%d/%m/%y"), task.result["type"]
@@ -418,9 +418,15 @@ _refund_template = """
 _extend_template = """
 <html>
 <body>
-    <h1>Your reservation {tx_id} of type {type} has been extended successfully</h1>
+    <h1>Your reservation has been extended successfully</h1>
     <div class="content">
-        <p>The reservation's expiry date is {expiry}</em></p>
+        <p>
+            <ul>
+                <li>Reservation ID: {tx_id}</li>
+                <li>Reservation type: {type}</li>
+                <li>Expiry date: {expiry}</li>
+            </ul>
+        </p>
     </div>
 </body>
 </html>

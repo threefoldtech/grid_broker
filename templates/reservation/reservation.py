@@ -39,7 +39,7 @@ class Reservation(TemplateBase):
             if not self.data.get(key):
                 raise ValueError("%s is not set" % key)
 
-    def extend(self, duration, bot_expiration):
+    def extend(self, duration, bot_expiration, trx_amount):
         try:
             self.state.check('actions', 'cleanup', 'ok')
             raise ValueError("Reservation can't be extended after it has already expired")
@@ -48,6 +48,11 @@ class Reservation(TemplateBase):
 
         if self.data["expiryTimestamp"] < time.time():
             raise ValueError("Reservation can't be extended after it has already expired")
+
+        amount = price(self.data['type'], self.data['size']) * duration
+        if trx_amount < amount:
+            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s" % (
+                             trx_amount, amount))
 
         extended = j.clients.tfchain.time.extend(self.data["expiryTimestamp"], duration)
         if date.fromtimestamp(extended) > date.fromtimestamp(bot_expiration):
@@ -65,10 +70,11 @@ class Reservation(TemplateBase):
             'reverse_proxy': self._install_proxy,
         }
 
-        amount = price(self.data['type'], self.data['size'])
+        duration = j.clients.tfchain.time.months_diff(self.data["creationTimestamp"], self.data["expiryTimestamp"])
+        amount = price(self.data['type'], self.data['size']) * duration
         if self.data['amount'] < amount:
-            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s",
-                             self.data['amount'], price)
+            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s" % (
+                             self.data['amount'], amount))
 
         install = deploy_map.get(self.data['type'])
         if not install:
@@ -438,7 +444,7 @@ def vm_price(size):
 
 
 def namespace_price(size):
-    return size * 83300000000.0
+    return size * 83300000.0
 
 
 def proxy_price(size):
