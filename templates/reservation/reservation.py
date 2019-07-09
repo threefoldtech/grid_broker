@@ -74,11 +74,11 @@ class Reservation(TemplateBase):
         if not install:
             raise ValueError("unsupported reservation type %s size %s" % (self.data['type'], self.data['size']))
 
-        install_result = install(self.data['size'])
+        install_result = install(self.data['size'], self.data['organization'])
         self.state.set('actions', 'install', 'ok')
         return install_result
 
-    def _install_vm(self, size, password):
+    def _install_vm(self, size, organization=''):
         if size == 1:
             cpu = 1
             memory = 2048
@@ -102,11 +102,14 @@ class Reservation(TemplateBase):
             'cpu': cpu,
             'disks': [{'diskType': 'ssd', 'label': 'cache', 'size': disk}],
             'image': 'zero-os:master',
-            'kernelArgs': [{'key': 'development', 'name': 'developmet'}, {'key': 'password', 'name': 'password', 'value': password}],
+            'kernelArgs': [{'key': 'development', 'name': 'developmet'}],
             'memory': memory,
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
             'nodeId': location
         }
+        if organization:
+            data['kernelArgs'].append({'key': 'organization', 'name': 'organization', 'value': organization})
+
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
