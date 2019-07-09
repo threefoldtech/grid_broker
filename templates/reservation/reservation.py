@@ -15,7 +15,7 @@ REVERSE_PROXY_UID = 'github.com/threefoldtech/0-templates/reverse_proxy/0.0.1'
 NAMESPACE_GUID = 'github.com/threefoldtech/0-templates/namespace/0.0.1'
 
 DIRECTORY_URL = 'https://capacity.threefoldtoken.com'
-
+MIGRATION_TIMESTAMP = 1562670098 # date on which the expirationtimestamp migration is done
 
 class Reservation(TemplateBase):
 
@@ -27,19 +27,9 @@ class Reservation(TemplateBase):
         self.recurring_action(self._cleanup, 3600*12)  # 12h
 
     def _migrate_service_expiry(self):
-        if self.data.get('creationTimestamp') and not self.data.get('expiryTimestamp'):
-            try:
-                self.state.check('actions', 'install', 'ok')
-                try:
-                    self.state.check('actions', 'cleanup', 'ok')
-                    # service has already been cleaned up, no need to migrate
-                    return
-                except StateCheckError:
-                    # this is an old service, set the expiry date to 1 month
+        creation = self.data.get('creationTimestamp')
+        if creation and creation < MIGRATION_TIMESTAMP and not self.data.get('expiryTimestamp'):
                     self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], 1)
-            except StateCheckError:
-                # this is not an old service
-                return
 
     def validate(self):
         # Check if this is an old installed service and if we need to set the expiryTimestamp
@@ -47,7 +37,7 @@ class Reservation(TemplateBase):
 
         for key in ['creationTimestamp', 'expiryTimestamp']:
             if not self.data.get(key):
-                raise ValueError("%s is not set")
+                raise ValueError("%s is not set" % key)
 
     def extend(self, duration, bot_expiration):
         try:
