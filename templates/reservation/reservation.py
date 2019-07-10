@@ -39,7 +39,7 @@ class Reservation(TemplateBase):
             if not self.data.get(key):
                 raise ValueError("%s is not set" % key)
 
-    def extend(self, duration, bot_expiration, trx_amount):
+    def extend(self, duration, bot_expiration, tx_amount):
         try:
             self.state.check('actions', 'install', 'ok')
         except StateCheckError:
@@ -55,9 +55,9 @@ class Reservation(TemplateBase):
             raise ValueError("Reservation can't be extended after it has already expired")
 
         amount = price(self.data['type'], self.data['size']) * duration
-        if trx_amount < amount:
+        if tx_amount < amount:
             raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s" % (
-                             trx_amount, amount))
+                             tx_amount, amount))
 
         extended = j.clients.tfchain.time.extend(self.data["expiryTimestamp"], duration)
         if date.fromtimestamp(extended) > date.fromtimestamp(bot_expiration):
