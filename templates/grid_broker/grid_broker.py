@@ -119,7 +119,7 @@ class GridBroker(TemplateBase):
             threebot_id, TfchainNetwork(self._tfchain_client.config.data["network"])).expiration_timestamp
 
         s = self.api.services.get(template_uid=RESERVATION_UID, name=data["transaction_id"])
-        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration}).wait(die=True)
+        task = s.schedule_action('extend', {"duration": data["duration"], "bot_expiration": bot_expiration, "tx_amount": data["amount"]}).wait(die=True)
         expiry_date = date.fromtimestamp(task.result["expiryTimestamp"])
 
         return expiry_date.strftime("%d/%m/%y"), task.result["type"]
@@ -129,7 +129,7 @@ class GridBroker(TemplateBase):
             "start processing transaction %s - %s", tx.id, tx.data)
 
         data["creationTimestamp"] = time.time()
-        data["expiryTimestamp"] = j.tools.time.extend(data["creationTimestamp"], data["duration"])
+        data["expiryTimestamp"] = j.clients.tfchain.time.extend(data["creationTimestamp"], data["duration"])
 
         # check if the reservation expiration exceeds the 3bot expiration before creating the reservation
         bot_expiration = j.clients.tfchain.threebot.get_record(
@@ -137,18 +137,13 @@ class GridBroker(TemplateBase):
         if date.fromtimestamp(data["expiryTimestamp"]) > date.fromtimestamp(bot_expiration):
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
-        try:
-            s = self.api.services.create(RESERVATION_UID, tx.id, data)
-            task = s.schedule_action('install').wait(die=True)
-            info = task.result
-            expiry_date = date.fromtimestamp(data["expiryTimestamp"])
-            info["expiry"] = expiry_date.strftime("%d/%m/%y")
-            return info
-        except ServiceConflictError:
-            # skip the creation of the service since it already exists
-            pass
-        finally:
-            self.save()
+        s = self.api.services.find_or_create(RESERVATION_UID, tx.id, data)
+        task = s.schedule_action('install').wait(die=True)
+        info = task.result
+        expiry_date = date.fromtimestamp(data["expiryTimestamp"])
+        info["expiry"] = expiry_date.strftime("%d/%m/%y")
+        self.save()
+        return info
 
     def _refund(self, tx):
         if not tx.amount > DEFAULT_MINERFEE:
@@ -423,9 +418,15 @@ _refund_template = """
 _extend_template = """
 <html>
 <body>
-    <h1>Your reservation {tx_id} of type {type} has been extended successfully</h1>
+    <h1>Your reservation has been extended successfully</h1>
     <div class="content">
-        <p>The reservation's expiry date is {expiry}</em></p>
+        <p>
+            <ul>
+                <li>Reservation ID: {tx_id}</li>
+                <li>Reservation type: {type}</li>
+                <li>Expiry date: {expiry}</li>
+            </ul>
+        </p>
     </div>
 </body>
 </html>

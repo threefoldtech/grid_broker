@@ -29,7 +29,7 @@ class Reservation(TemplateBase):
     def _migrate_service_expiry(self):
         creation = self.data.get('creationTimestamp')
         if creation and creation < MIGRATION_TIMESTAMP and not self.data.get('expiryTimestamp'):
-                    self.data['expiryTimestamp'] = j.tools.time.extend(self.data['creationTimestamp'], 1)
+                    self.data['expiryTimestamp'] = j.clients.tfchain.time.extend(self.data['creationTimestamp'], 1)
 
     def validate(self):
         # Check if this is an old installed service and if we need to set the expiryTimestamp
@@ -39,7 +39,12 @@ class Reservation(TemplateBase):
             if not self.data.get(key):
                 raise ValueError("%s is not set" % key)
 
-    def extend(self, duration, bot_expiration):
+    def extend(self, duration, bot_expiration, tx_amount):
+        try:
+            self.state.check('actions', 'install', 'ok')
+        except StateCheckError:
+            raise ValueError("Reservation can't be extended before it has been installed")
+
         try:
             self.state.check('actions', 'cleanup', 'ok')
             raise ValueError("Reservation can't be extended after it has already expired")
@@ -49,7 +54,12 @@ class Reservation(TemplateBase):
         if self.data["expiryTimestamp"] < time.time():
             raise ValueError("Reservation can't be extended after it has already expired")
 
-        extended = j.tools.time.extend(self.data["expiryTimestamp"], duration)
+        amount = price(self.data['type'], self.data['size']) * duration
+        if tx_amount < amount:
+            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s" % (
+                             tx_amount, amount))
+
+        extended = j.clients.tfchain.time.extend(self.data["expiryTimestamp"], duration)
         if date.fromtimestamp(extended) > date.fromtimestamp(bot_expiration):
             raise ValueError("Reservation expiration can't exceed 3bot expiration")
 
@@ -65,20 +75,21 @@ class Reservation(TemplateBase):
             'reverse_proxy': self._install_proxy,
         }
 
-        amount = price(self.data['type'], self.data['size'])
+        duration = j.clients.tfchain.time.months_diff(self.data["creationTimestamp"], self.data["expiryTimestamp"])
+        amount = price(self.data['type'], self.data['size']) * duration
         if self.data['amount'] < amount:
-            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s",
-                             self.data['amount'], price)
+            raise ValueError("transaction amount is to low to deploy the workload. given: %s needed: %s" % (
+                             self.data['amount'], amount))
 
         install = deploy_map.get(self.data['type'])
         if not install:
             raise ValueError("unsupported reservation type %s size %s" % (self.data['type'], self.data['size']))
 
-        install_result = install(self.data['size'])
+        install_result = install(self.data['size'], self.data['organization'])
         self.state.set('actions', 'install', 'ok')
         return install_result
 
-    def _install_vm(self, size):
+    def _install_vm(self, size, organization=''):
         if size == 1:
             cpu = 1
             memory = 2048
@@ -107,9 +118,13 @@ class Reservation(TemplateBase):
             'mgmtNic': {'id': '9bee8941b5717835', 'type': 'zerotier', 'ztClient': 'tf_public'},
             'nodeId': location
         }
+        if organization:
+            data['kernelArgs'].append({'key': 'organization', 'name': 'organization', 'value': organization})
+
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
+        self.logger.info("vm %s installed", self.data['txId'])
 
         # save created service id
         # used to delete the service during cleanup
@@ -145,7 +160,7 @@ class Reservation(TemplateBase):
             'zos_addr': zos_addr,
             'vnc_addr': vnc_addr}
 
-    def _install_s3(self, size):
+    def _install_s3(self, size, *args, **kwargs):
         if size == 1:
             disk = 500
         elif size == 2:
@@ -181,7 +196,7 @@ class Reservation(TemplateBase):
             return
 
         urls = task.result
-        self.logger.info("s3 installed %s at", urls)
+        self.logger.info("s3 installed at %s", urls)
 
         rp_data = {
             'webGateway': self.data['webGateway'],
@@ -237,7 +252,7 @@ class Reservation(TemplateBase):
             'password': s3.data['minioPassword_'],
             'domain': rp.data['domain']}
 
-    def _install_namespace(self, size):
+    def _install_namespace(self, size, *args, **kwargs):
         # convert enum number to string
         #  see https://github.com/threefoldtech/jumpscaleX/blob/development/Jumpscale/clients/blockchain/tfchain/schemas/reservation_namespace.schema#L8
         disk_type_map = {
@@ -435,7 +450,7 @@ def vm_price(size):
 
 
 def namespace_price(size):
-    return size * 83300000000.0
+    return size * 83300000.0
 
 
 def proxy_price(size):

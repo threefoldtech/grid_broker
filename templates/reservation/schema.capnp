@@ -18,6 +18,7 @@ struct Schema {
     # this is automaticallty filled
     createdServices @12 :List(CreatedService);
     expiryTimestamp @13 :Int32;
+    organization @14 :Text;
 
     enum Type {
         vm @0;
