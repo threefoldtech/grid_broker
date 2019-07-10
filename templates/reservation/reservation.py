@@ -119,6 +119,7 @@ class Reservation(TemplateBase):
         vm = self.api.services.find_or_create(DMVM_GUID, self.data['txId'], data)
         vm.schedule_action('install').wait(die=True)
         vm.schedule_action('enable_vnc').wait(die=True)
+        self.logger.info("vm %s installed", self.data['txId'])
 
         # save created service id
         # used to delete the service during cleanup
@@ -190,7 +191,7 @@ class Reservation(TemplateBase):
             return
 
         urls = task.result
-        self.logger.info("s3 installed %s at", urls)
+        self.logger.info("s3 installed at %s", urls)
 
         rp_data = {
             'webGateway': self.data['webGateway'],
