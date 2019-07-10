@@ -41,6 +41,11 @@ class Reservation(TemplateBase):
 
     def extend(self, duration, bot_expiration, trx_amount):
         try:
+            self.state.check('actions', 'install', 'ok')
+        except StateCheckError:
+            raise ValueError("Reservation can't be extended before it has been installed")
+
+        try:
             self.state.check('actions', 'cleanup', 'ok')
             raise ValueError("Reservation can't be extended after it has already expired")
         except StateCheckError:
