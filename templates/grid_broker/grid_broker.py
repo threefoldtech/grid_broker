@@ -279,6 +279,7 @@ class GridBroker(TemplateBase):
 
 
 class TransactionWatcher:
+    BUFFER = 8000 # This is roughly the maximum number of transactions that can exist in the same block
 
     def __init__(self, wallet, min_blockheight=0):
         self._wallet = wallet
@@ -289,7 +290,9 @@ class TransactionWatcher:
         txns = self._wallet.list_incoming_transactions()
         txns.reverse()
         try:
-            for tx in txns[self.last_sent:]:
+            index = self.last_sent - self.BUFFER
+            index = index if index >= 0 else 0
+            for tx in txns[index:]:
                 self.last_sent += 1
                 # ignore tx created before the min block height
                 # unconfirmed tx have block height 0, add extra check for that
